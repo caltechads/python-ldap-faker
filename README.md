@@ -1,7 +1,7 @@
 # python-ldap-faker
 
 This package provides a fake `python-ldap` interface that can be used for
-automated testing of code that uses `python-ldap`.  
+automated testing of code that uses `python-ldap`.
 
 When writing tests for code that talks to an LDAP server with `python-ldap`, we
 want to be able to control `python-ldap` interactions in our tests to ensure
@@ -95,7 +95,7 @@ Mock_ library to achieve that::
             LDAPObjectStore.reset()
 ```
 
-The mock ldap object implements the following ldap operations:
+The `FakeLDAPObject` object implements the following ldap operations:
 
 - add_s
 - compare_s
@@ -107,83 +107,3 @@ The mock ldap object implements the following ldap operations:
 - search_s
 - simple_bind_s
 - unbind_s
-
-This is an example how to use ``MockLDAP`` with fixed return values:
-
-```python
-def test_some_ldap_group_stuff(self):
-    # Define the expected return value for the ldap operation
-    return_value = ("cn=testgroup,ou=group,dc=30loops,dc=net", {
-        'objectClass': ['posixGroup'],
-        'cn': 'testgroup',
-        'gidNumber': '2030',
-    })
-
-    # Register a return value with the MockLDAP object
-    _mock_ldap.set_return_value('add_s',
-        ("cn=testgroup,ou=groups,dc=30loops,dc=net", (
-            ('objectClass', ('posixGroup')),
-            ('cn', 'testgroup'),
-            ('gidNumber', '2030'))),
-        (105,[], 10, []))
-
-    # Run your actual code, this is just an example
-    group_manager = GroupManager()
-    result = group_manager.add("testgroup")
-
-    # assert that the return value of your method and of the MockLDAP
-    # are as expected, here using python-nose's eq() test tool:
-    eq_(return_value, result)
-
-    # Each actual ldap call your software makes gets recorded. You could
-    # prepare a list of calls that you expect to be issued and compare it:
-    called_records = []
-
-    called_records.append(('simple_bind_s',
-        {'who': 'cn=admin,dc=30loops,dc=net', 'cred': 'ldaptest'}))
-
-    called_records.append(('add_s', {
-        'dn': 'cn=testgroup,ou=groups,dc=30loops,dc=net",
-        'record': [
-            ('objectClass', ['posixGroup']),
-            ('gidNumber', '2030'),
-            ('cn', 'testgroup'),
-            ]}))
-
-    # And again test the expected behaviour
-    eq_(called_records, _mock_ldap.ldap_methods_called_with_arguments())
-```
-
-Besides of fixing return values for specific calls, you can also imitate a full
-ldap server with a directory of entries:
-
-```python
-# Create an instance of MockLDAP with a preset directory
-tree = {
-    "cn=admin,dc=30loops,dc=net": {
-            "userPassword": "ldaptest"
-    }
-}
-mock_ldap = MockLDAP(tree)
-
-record = [
-    ('uid', 'crito'),
-    ('userPassword', 'secret'),
-]
-# The return value I expect when I add another record to the directory
-eq_(
-    (105,[],1,[]),
-    mock_ldap.add_s("uid=crito,ou=people,dc=30loops,dc=net", record)
-)
-
-# The expected directory
-directory = {
-    "cn=admin,dc=30loops,dc=net": {"userPassword": "ldaptest"},
-    "uid=crito,ou=people,dc=30loops,dc=net": {
-        "uid": "crito", "userPassword": "secret"}
-}
-# Compare the expected directory with the MockLDAP directory
-eq_(directory, mock_ldap.directory)
-```
-
-.. _Mock: http://www.voidspace.org.uk/python/mock/
