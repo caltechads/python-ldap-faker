@@ -1,0 +1,28 @@
+[
+    [
+        "uid=user,ou=mydept,o=myorg,c=country",
+        {
+            "cn": ["Firstname User1"],
+            "uid": ["user"],
+            "uidNumber": ["123"],
+            "gidNumber": ["456"],
+            "homeDirectory": ["/home/user"],
+            "loginShell": ["/bin/bash"],
+            "userPassword": ["the password"],
+            "objectclass": ["posixAccount", "top"]
+        }
+    ],
+    [
+        "uid=user2,ou=mydept,o=myorg,c=country",
+        {
+            "cn": ["Firstname User2"],
+            "uid": ["user1"],
+            "uidNumber": ["124"],
+            "gidNumber": ["457"],
+            "homeDirectory": ["/home/user1"],
+            "loginShell": ["/bin/bash"],
+            "userPassword": ["the password"],
+            "objectclass": ["posixAccount", "top"]
+        }
+    ]
+]

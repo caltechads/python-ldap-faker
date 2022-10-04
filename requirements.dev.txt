@@ -1,0 +1,6 @@
+# Development
+# ------------------------------------------------------------------------------
+autopep8                                      # https://github.com/hhatto/autopep8
+flake8                                        # https://github.com/PyCQA/flake8
+pycodestyle==2.5.0                            # https://github.com/PyCQA/pycodestyle
+mypy                                          # https://github.com/python/mypy
