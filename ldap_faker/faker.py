@@ -10,13 +10,13 @@ import ldap
 
 from .db import (
     CallHistory,
+    LDAPCallRecord,
     LDAPServerFactory,
     ObjectStore,
     OptionStore,
 )
 from .logging import logger
 from .types import (
-    LDAPCallRecord,
     LDAPOptionValue,
     LDAPRecord,
     ModList,

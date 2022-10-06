@@ -1,4 +1,4 @@
-from typing import Dict, Any, Tuple, List, Union
+from typing import Dict, Tuple, List, Union
 
 from case_insensitive_dict import CaseInsensitiveDict
 
@@ -6,7 +6,6 @@ from case_insensitive_dict import CaseInsensitiveDict
 # Types
 # ====================================
 
-LDAPCallRecord = Tuple[str, Dict[str, Any]]
 LDAPData = Dict[str, List[bytes]]
 CILDAPData = CaseInsensitiveDict[str, List[str]]
 LDAPRecord = Tuple[str, LDAPData]
