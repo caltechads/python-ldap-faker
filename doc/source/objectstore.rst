@@ -117,13 +117,15 @@ Thus:
   * Attribute values are ``List[bytes]``
 
 
+.. _File format for ObjectStore.load_objects:
+
 File format for ObjectStore.load_objects
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 Unfortunately, JSON has neither a ``Tuple`` type nor a ``bytes`` type, so we
 need to use lists and strings instead, and convert them to the appropriate types
 after reading the JSON file.  Thus in our JSON files, we must provide our data
-as ``List[List[str, List[str]]]`` instead.  Example::
+as ``List[List[str, Dict[str, List[str]]]]`` instead.  Example::
 
   [
     [
