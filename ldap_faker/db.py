@@ -152,8 +152,6 @@ class LDAPServerFactory:
         Raises:
             ValueError: raised if a default is already configured while trying to
                 register an :py:class:`ObjectStore` with a specific ``uri``
-
-        Warnings:
             RuntimeWarning: raised if we try to overwrite an already registered object
                 store with a new one
         """
@@ -363,13 +361,13 @@ class ObjectStore:
     def __init__(self):
         # raw_objects preserves the object attribute case as it was given to us
         # by register_object, and retains the values as List[bytes]
-        self.raw_objects: RawLDAPObjectStore = RawLDAPObjectStore()
+        self.raw_objects: RawLDAPObjectStore = RawLDAPObjectStore()  #: LDAP records as they would have been returned by ``python-ldap```
         # objects has the same data as raw_objects, but here we forces the
         # attribute names on each object to be case insensitive, and we convert
         # values to List[str].  We need that because in LDAP searches, attribute
         # names and values are compared as case-insensitive, and Filter.match()
         # expects the filter and values to be strings
-        self.objects: LDAPObjectStore = LDAPObjectStore()
+        self.objects: LDAPObjectStore = LDAPObjectStore()  #: LDAP records set up to make searching better
         self.searches: LDAPSearchDirectory = LDAPSearchDirectory()
 
     def __convert_LDAPData(self, data: LDAPData) -> CILDAPData:
@@ -404,8 +402,9 @@ class ObjectStore:
             by ``python-ldap`` are of type ``Tuple[str, Dict[str,
             List[bytes]]]`` but JSON has no concept of ``bytes`` or ``tuple``.
             Thus we will expect the LDAP records in the file to have type
-            ``List[str, Dict[str, List[str]]]`` and we will ``.encode()`` each
-            string value before saving to the database.
+            ``List[str, Dict[str, List[str]]]`` and we will convert them to
+            ``Tuple[str, Dict[str, List[bytes]]]`` before saving to
+            :py:attr:`raw_objects`
 
         Args:
             filename: the path to the JSON file to load
