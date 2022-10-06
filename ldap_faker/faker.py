@@ -64,6 +64,22 @@ def record_call(func):
     return inner
 
 
+def needs_bind(func):
+    @wraps(func)
+    def inner(self, dn: str, *args, **kwargs):
+        if not self.bound_dn:
+            raise ldap.INSUFFICIENT_ACCESS({
+                'msgtype': 105,
+                'msgid': 1,
+                'result': 50,
+                'desc': 'Insufficient access',
+                'ctrls': [],
+                'info': f"Insufficient '{func.__name__}' privilege for the entry '{dn}'\n"
+            })
+        return func(self, dn, *args, **kwargs)
+    return inner
+
+
 def handle_return_value(func):
     """
     Check to see whether we have a specific return value configured for this
@@ -327,14 +343,19 @@ class FakeLDAPObject:
         Raises:
             ldap.INVALID_CREDENTIALS: the ``who`` did not match the ``cred``
         """
-        success = False
         if (who == '' and cred == ''):
-            success = True
-        elif self._compare_s(who.lower(), 'userPassword', cred):
-            success = True
-        if not success:
-            raise ldap.INVALID_CREDENTIALS(f'{who}:{cred}')
-        self.bound = (who, self.directory.get(who))
+            return
+
+        if self.directory.exists(who) and self._compare_s(who.lower(), 'userPassword', cred):
+            self.bound_dn = who
+            return
+        raise ldap.INVALID_CREDENTIALS({
+            'msgtype': 97,
+            'msgid': 2,
+            'result': 49,
+            'desc': 'Invalid credentials',
+            'ctrls': []
+        })
 
     @record_call
     def search_ext(
@@ -462,6 +483,7 @@ class FakeLDAPObject:
                 entry[key] = value
         self.directory.set(dn, entry)
 
+    @needs_bind
     @record_call
     def delete_s(self, dn: str) -> None:
         """
@@ -483,6 +505,7 @@ class FakeLDAPObject:
         """
         self.directory.delete(dn)
 
+    @needs_bind
     @record_call
     def add_s(self, dn: str, modlist: AddModList) -> None:
         """
@@ -505,6 +528,7 @@ class FakeLDAPObject:
         except KeyError:
             self.directory.set(dn, entry)
 
+    @needs_bind
     @record_call
     def rename_s(
         self,
@@ -545,7 +569,7 @@ class FakeLDAPObject:
 
     @record_call
     def unbind_s(self) -> None:
-        pass
+        self.bound_dn = None
 
     #
     # Internal implementations
