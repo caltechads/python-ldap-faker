@@ -255,9 +255,10 @@ class FakeLDAP:
         """
         return [conn for conn in self.connections if conn.uri == uri]
 
-    def filter_calls(self, api_name: str = None, uri: str = None) -> List[LDAPCallRecord]:
+    def connection_calls(self, api_name: str = None, uri: str = None) -> CallHistory:
         """
-        Filter our call history by function name and optionally LDAP URI.
+        Filter our the call history for our connections by function name and
+        optionally LDAP URI.
 
         Args:
 
@@ -266,8 +267,7 @@ class FakeLDAP:
             uri: restrict our search to only calls to this URI
 
         Returns:
-            A list of (``api_name``, ``arguments``) tuples in the order in which the
-            calls were made.  Arguments is a ``Dict[str, Any]``.
+            A :py:class:`CallHistory` with combined calls from the filtered connections.
         """
         results: List[LDAPCallRecord] = []
         for conn in self.connections:
@@ -277,7 +277,7 @@ class FakeLDAP:
                 results.extend(conn.calls.filter_calls(api_name))
             else:
                 results.extend(conn.calls._calls)
-        return results
+        return CallHistory(results)
 
 
 # =========================

@@ -1,12 +1,12 @@
 from __future__ import annotations
 from pathlib import Path
 import sys
-from typing import List, Optional, cast
+from typing import Any, Dict, List, Optional, cast
 from unittest.mock import patch
 
 from .db import LDAPServerFactory
-from .faker import FakeLDAP
-from .types import LDAPFixtureList
+from .faker import FakeLDAP, FakeLDAPObject
+from .types import LDAPFixtureList, LDAPOptionValue
 
 
 class LDAPFakerMixin:
@@ -168,13 +168,125 @@ class LDAPFakerMixin:
         self.fake_ldap: FakeLDAP = FakeLDAP(self.server_factory)
         self.patches = []
         for mod in self.ldap_modules:
-            ldap_patch = patch(f'{mod}.ldap.initialize', self.fake_ldap.initialize)
-            ldap_patch.start()
-            self.patches.append(ldap_patch)
+            init_patch = patch(f'{mod}.ldap.initialize', self.fake_ldap.initialize)
+            init_patch.start()
+            self.patches.append(init_patch)
+            set_patch = patch(f'{mod}.ldap.set_option', self.fake_ldap.set_option)
+            set_patch.start()
+            self.patches.append(set_patch)
+            get_patch = patch(f'{mod}.ldap.get_option', self.fake_ldap.get_option)
+            get_patch.start()
+            self.patches.append(get_patch)
 
     def tearDown(self):
         """
         Undo the patches we made in :py:meth:`setUp`
         """
-        for ldap_patch in self.patches:
-            ldap_patch.stop()
+        for p in self.patches:
+            p.stop()
+
+    # Helpers
+
+    def get_connections(self, uri: str = None) -> List[FakeLDAPObject]:
+        """
+        Return a the list of :py:class:`FakeLDAPObject` objects generated during our test,
+        optionally filtered by LDAP URI.
+
+        Keyword Args:
+            uri: the LDAP URI by which to filter our connections
+
+
+        """
+        if not uri:
+            return self.fake_ldap.connections
+        return [conn for conn in self.fake_ldap.connections if conn.uri == uri]
+
+    # Asserts
+
+    def assertGlobalOptionSet(self, option: int, value: LDAPOptionValue) -> None:
+        """
+        Assert that a global LDAP option was set.
+
+        Args:
+            option: an LDAP option (e.g. ldap.OPT_DEBUG_LEVEL)
+            value: the value we expect the option to be set to
+        """
+        self.assertGlobalFunctionCalled('set_option')
+        self.assertTrue(option in self.fake_ldap.options)   # type: ignore
+        self.assertEqual(self.fake_ldap.options[option], value)  # type: ignore
+
+    def assertGlobalFunctionCalled(self, api_name: str) -> None:
+        """
+        Assert that a global LDAP function was called.
+
+        Args:
+            api_name: the name of the function to look for (e.g. ``initialize``)
+        """
+        self.asserTrue(api_name in self.fake_ldap.calls.names)  # type: ignore
+
+    def assertLDAPConnectionOptionSet(
+        self,
+        conn: FakeLDAPObject,
+        option: str,
+        value: LDAPOptionValue,
+    ) -> None:
+        """
+        Assert that a specific :py:class:`FakeLDAPObject` option was set with a
+        specific value.
+
+        Args:
+            conn: the connection object to examine
+            option: the code for the option (e.g. :py:data:`ldap.OPT_X_TLS_NEWCTX`)
+            value: the value we expect the option to be set to
+        """
+        self.assertLDAPConnectionMethodCalled(conn, 'set_option')
+        self.assertTrue(option in conn.options)   # type: ignore
+        self.assertEqual(conn.options[option], value)  # type: ignore
+
+    def assertLDAPConnectionMethodCalled(
+        self,
+        conn: FakeLDAPObject,
+        api_name: str,
+        arguments: Dict[str, Any] = None
+    ) -> None:
+        """
+        Assert that a specific :py:class:`FakeLDAPObject` method was called, possibly
+        specifying the specific arguments it should have been called with.
+
+        Args:
+            conn: the connection object to examine
+            api_name: the name of the function to look for (e.g. ``simple_bind_s``)
+
+        Keyword Args:
+            arguments: if given, assert that the call exists AND was called this set
+                of arguments.  See :py:class:`LDAPCallRecord` for how the ``arguments``
+                dict should be constructed.
+        """
+        if not arguments:
+            self.assertNotEqual(api_name in conn.calls.names)  # type: ignore
+        for call in conn.calls.filter_calls(api_name):
+            if call.args == arguments:
+                return
+        self.fail(f'No call for "{api_name}" with args {arguments} found.')  # type: ignore
+
+    def assertLDAPConnectionMethodCalledAfter(
+        self,
+        conn: FakeLDAPObject,
+        api_name: str,
+        target_api_name: str
+    ) -> None:
+        """
+        Assert that a specific :py:class:`FakeLDAPObject` method was called after another
+        specific :py:class:`FakeLDAPObject` method.
+
+        Args:
+            conn: the connection object to examine
+            api_name: the name of the function to look for (e.g. ``simple_bind_s``)
+            target_api_name: the name of the function which should appear before
+                ``api_name`` in the call history
+        """
+        self.assertLDAPConnectionMethodCalled(conn, target_api_name)
+        self.assertLDAPConnectionMethodCalled(conn, api_name)
+        api_names = conn.calls.names
+        self.assertTrue(api_names.index(api_name) > api_names.index(target_api_name))  # type: ignore
+        self.assertNotEqual(api_name in conn.calls.names)  # type: ignore
