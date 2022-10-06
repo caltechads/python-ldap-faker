@@ -25,15 +25,6 @@ from .types import (
 
 
 # ====================================
-# Global objects
-# ====================================
-
-LDAPGlobalOptions = OptionStore()
-GlobalLDAPCallHistory = CallHistory()
-Servers = LDAPServerFactory()
-
-
-# ====================================
 # Decorators
 # ====================================
 
@@ -53,13 +44,9 @@ def record_call(func):
     def inner(*args, **kwargs):
         sig = inspect.signature(func)
         args_dict = dict(sig.bind(*args, **kwargs).arguments)
-        if 'self' in args_dict:
-            args_dict['self'].calls.register(func.__name__, args_dict)
-            del args_dict['self']
-            logger.debug("record_call api=%s, arguments=%s", func.__name__, args_dict)
-        else:
-            logger.debug("record_call.global api=%s, arguments=%s", func.__name__, args_dict)
-            GlobalLDAPCallHistory.register_global(func.__name__, args_dict)
+        args_dict['self'].calls.register(func.__name__, args_dict)
+        del args_dict['self']
+        logger.debug("record_call api=%s, arguments=%s", func.__name__, args_dict)
         return func(*args, **kwargs)
     return inner
 
@@ -174,10 +161,9 @@ class FakeLDAP:
         """
         if uri not in self.stores:
             self.stores[uri] = self.server_factory.get(uri)
-        conn = FakeLDAPObject(directory=self.stores[uri], uri=uri)
+        conn = FakeLDAPObject(uri, store=self.stores[uri])
         self.connections.append(conn)
         return conn
-
 
     @record_call
     def set_option(self, option: int, invalue: LDAPOptionValue) -> None:
@@ -301,7 +287,11 @@ class FakeLDAPObject:
         directory: a populated :py:class:`ObjectStore`
     """
 
-    def __init__(self, directory: ObjectStore = None, uri: str = None):
+    def __init__(
+        self,
+        uri: str,
+        store: ObjectStore = None,
+    ):
         # cookie and _async_results are used for the paged search implementation
         self.cookie: int = 0
         self._async_results: Dict[int, Dict[str, ldap.controls.LDAPControl]] = {}
@@ -310,10 +300,11 @@ class FakeLDAPObject:
         self.uri: str = uri  #: the LDAP URI for this connection
         self.options: OptionStore  = OptionStore()  #: we store data from :py:meth:`set_option` calls here
         # directory is our our prepared LDAP data objects and faked searches
-        if directory:
-            self.directory: ObjectStore = directory
+        self.store: ObjectStore  #: our copy of our ObjectStore for this connection
+        if store:
+            self.store = store
         else:
-            self.directory = ObjectStore()
+            self.store = ObjectStore()
         # calls is our call history
         self.calls: CallHistory = CallHistory()  #: The method call history
         self.tls_enabled: bool = False  #: Set to True if :py:meth:`start_tls_s` was called
@@ -346,7 +337,7 @@ class FakeLDAPObject:
         if (who == '' and cred == ''):
             return
 
-        if self.directory.exists(who) and self._compare_s(who.lower(), 'userPassword', cred):
+        if self.store.exists(who) and self._compare_s(who.lower(), 'userPassword', cred):
             self.bound_dn = who
             return
         raise ldap.INVALID_CREDENTIALS({
@@ -399,7 +390,6 @@ class FakeLDAPObject:
         return ldap.RES_SEARCH_RESULT, data, msgid, controls
 
     @record_call
-    @handle_return_value
     def search_s(
         self,
         base: str,
@@ -422,11 +412,13 @@ class FakeLDAPObject:
                     'ctrls': [],
                     'info': 'Start TLS request accepted.Server willing to negotiate SSL.'
                 }
+            )
 
     @record_call
     def compare_s(self, dn: str, attr: str, value: Any) -> bool:
         return self._compare_s(dn, attr, value)
 
+    @needs_bind
     @record_call
     def modify_s(self, dn, modlist: ModList) -> None:
         """
@@ -513,7 +505,7 @@ class FakeLDAPObject:
             ldap.NO_SUCH_OBJECT: no object with dn of ``dn`` exists in our object store
             ldap.INSUFFICIENT_ACCESS: you need to do a non-anonymous bind before doing this
         """
-        self.directory.delete(dn)
+        self.store.delete(dn)
 
     @needs_bind
     @record_call
@@ -533,10 +525,10 @@ class FakeLDAPObject:
         for item in modlist:
             entry[item[0]] = item[1]
         try:
-            self.directory.get(dn)
+            self.store.get(dn)
             raise ldap.ALREADY_EXISTS({'info': '', 'desc': 'Object already exists'})
         except KeyError:
-            self.directory.set(dn, entry)
+            self.store.set(dn, entry)
 
     @needs_bind
     @record_call
@@ -565,17 +557,17 @@ class FakeLDAPObject:
             ldap.NO_SUCH_OBJECT: no object with dn of ``dn`` exists in our object store
             ldap.INSUFFICIENT_ACCESS: you need to do a non-anonymous bind before doing this
         """
-        entry = self.directory.copy(dn)
-        if not superior:
+        entry = self.store.copy(dn)
+        if not newsuperior:
             basedn = ','.join(dn.split(',')[1:])
         else:
-            basedn = superior
+            basedn = newsuperior
         newdn = newrdn + ',' + basedn
         attr, value = newrdn.split('=')
         entry[attr] = [value.encode('utf-8')]
-        self.directory.set(newdn, entry)
-        if dn != newrdn:
-            self.directory.delete(dn)
+        self.store.set(newdn, entry)
+        if delold and dn != newrdn:
+            self.store.delete(dn)
 
     @record_call
     def unbind_s(self) -> None:
@@ -587,7 +579,7 @@ class FakeLDAPObject:
 
     def _compare_s(self, dn: str, attr: str, value: Any) -> bool:
         try:
-            found = value.encode('utf-8') in self.directory.get(dn)[attr]
+            found = value.encode('utf-8') in self.store.get(dn)[attr]
         except KeyError:
             found = False
         return found
@@ -606,7 +598,7 @@ class FakeLDAPObject:
         Beyond that, you're on your own.
         """
         if scope == ldap.SCOPE_BASE:
-            return self.directory.search_base(base, filterstr, attrlist=attrlist)
+            return self.store.search_base(base, filterstr, attrlist=attrlist)
         if scope == ldap.SCOPE_ONELEVEL:
-            return self.directory.search_onelevel(base, filterstr, attrlist=attrlist)
-        return self.directory.search_subtree(base, filterstr, attrlist=attrlist)
+            return self.store.search_onelevel(base, filterstr, attrlist=attrlist)
+        return self.store.search_subtree(base, filterstr, attrlist=attrlist)

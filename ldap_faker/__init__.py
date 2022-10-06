@@ -1,3 +1,5 @@
+__version__ = "1.0.0"
+
 from .faker import (  # noqa:F403,F401
     FakeLDAP,
     FakeLDAPObject,
@@ -6,9 +8,9 @@ from .faker import (  # noqa:F403,F401
 from .db import (  # noqa:F403,F401
     CallHistory,
     LDAPCallRecord,
+    LDAPServerFactory,
     ObjectStore,
     OptionStore,
-    LDAPServerFactory,
 )
 
 from .unittest import (  # noqa:F403,F401
