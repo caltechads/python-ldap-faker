@@ -615,6 +615,23 @@ class ObjectStore:
 
     # Main methods
 
+    @property
+    def count(self):
+        return len(self.objects)
+
+    def exists(self, dn: str) -> bool:
+        """
+        Test whether an object with dn ``dn`` exists.
+
+        Args:
+            dn: the dn of the object to look for
+
+        Returns:
+            ``True`` if the object exists, ``False`` otherwise.
+
+        """
+        return dn in self.objects
+
     def get(self, dn: str) -> LDAPData:
         """
         Return data for an object from our object store.
