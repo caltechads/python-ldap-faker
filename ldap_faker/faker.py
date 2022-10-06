@@ -411,7 +411,17 @@ class FakeLDAPObject:
         return self._search_s(base, scope, filterstr, attrlist, attrsonly)
 
     def start_tls_s(self) -> None:
-        self.tls_enabled = True
+        if not self.tls_enabled:
+            self.tls_enabled = True
+        else:
+            raise ldap.LOCAL_ERROR(
+                {
+                    'result': -2,
+                    'desc': 'Local error',
+                    'errno': 35,
+                    'ctrls': [],
+                    'info': 'Start TLS request accepted.Server willing to negotiate SSL.'
+                }
 
     @record_call
     def compare_s(self, dn: str, attr: str, value: Any) -> bool:
