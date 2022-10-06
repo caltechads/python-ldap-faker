@@ -15,6 +15,8 @@ Unittest Support
     :inherited-members:
     :undoc-members:
 
+.. autoclass:: LDAPCallRecord
+    :members:
 
 .. autoclass:: CallHistory
     :inherited-members:
@@ -47,3 +49,22 @@ LDAP Server like objects
 .. autoclass:: OptionStore
     :inherited-members:
     :undoc-members:
+
+Type Aliases
+------------
+
+.. autodata:: ldap_faker.types.LDAPOptionValue
+
+.. autodata:: ldap_faker.types.LDAPData
+
+.. autodata:: ldap_faker.types.LDAPRecord
+
+.. autodata:: ldap_faker.types.LDAPSearchResult
+
+.. autodata:: ldap_faker.types.ModList
+
+.. autodata:: ldap_faker.types.AddModList
+
+.. autodata:: ldap_faker.types.LDAPFixtureList
+
+

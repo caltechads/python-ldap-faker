@@ -116,7 +116,7 @@ class FakeLDAP:
 
     def __init__(self, server_factory: LDAPServerFactory) -> None:
         self.connections: List["FakeLDAPObject"] = []  #: list of :py:class:`FakeLDAPObject` connections created in the order in which they were requested
-        self.calls: CallHistory = CallHistory()  #: The list of global ldap calls made, with arguments in the order they were made
+        self.calls: CallHistory = CallHistory()  #: The call history for global ldap function calls
         self.options: OptionStore = OptionStore()  #: A dictionary of LDAP options set
         self.stores: Dict[str, ObjectStore] = {}
         self.server_factory: LDAPServerFactory = server_factory
@@ -277,6 +277,12 @@ class FakeLDAPObject:
         This is a disposable object that should be recreated for each test, mostly
         because changes to our ``ObjectStore`` can't be undone without re-copying
         from its source in ``Servers``.
+
+    Args:
+        uri: the LDAP URI of the connection
+
+    Keyword Args:
+        directory: a populated :py:class:`ObjectStore`
     """
 
     def __init__(self, directory: ObjectStore = None, uri: str = None):
@@ -285,19 +291,17 @@ class FakeLDAPObject:
         self._async_results: Dict[int, Dict[str, ldap.controls.LDAPControl]] = {}
 
         # This is the URI to which we connected
-        self.uri = uri
-        # options is where we store data from set_option() calls
-        self.options = OptionStore()
+        self.uri: str = uri  #: the LDAP URI for this connection
+        self.options: OptionStore  = OptionStore()  #: we store data from :py:meth:`set_option` calls here
         # directory is our our prepared LDAP data objects and faked searches
         if directory:
-            self.directory = directory
+            self.directory: ObjectStore = directory
         else:
             self.directory = ObjectStore()
         # calls is our call history
-        self.calls = CallHistory()
-        self.tls_enabled: bool = False
-        self.bound: Optional[LDAPRecord] = None
-
+        self.calls: CallHistory = CallHistory()  #: The method call history
+        self.tls_enabled: bool = False  #: Set to True if :py:meth:`start_tls_s` was called
+        self.bound_dn: Optional[str] = None  #: Set by :py:meth:`simple_bind_s` to the dn of the user after success
 
     # LDAPObject methods
 
@@ -319,6 +323,9 @@ class FakeLDAPObject:
         Keyword Args:
             who: the dn of the user with which to bind
             cred:  the password for that user
+
+        Raises:
+            ldap.INVALID_CREDENTIALS: the ``who`` did not match the ``cred``
         """
         success = False
         if (who == '' and cred == ''):
@@ -390,7 +397,46 @@ class FakeLDAPObject:
         return self._compare_s(dn, attr, value)
 
     @record_call
-    def modify_s(self, dn, mod_attrs: ModList) -> None:
+    def modify_s(self, dn, modlist: ModList) -> None:
+        """
+        Modify the object with dn of ``dn`` using the modlist ``modlist``.
+
+        Each element in the list modlist should be a tuple of the form
+        ``(mod_op: int, mod_type: str, mod_vals: Union[bytes, List[bytes]])``, where
+        ``mod_op`` indicates the operation (one of :py:attr:`ldap.MOD_ADD`,
+        :py:attr:`ldap.MOD_DELETE`, or :py:attr:`ldap.MOD_REPLACE`, ``mod_type``
+        is a string indicating the attribute type name, and ``mod_vals`` is
+        either a bytes value or a list of bytes values to add, delete or
+        replace respectively. For the delete operation, ``mod_vals`` may be ``None``
+        indicating that all attributes are to be deleted.
+
+        Note:
+            :py:func:`ldap.modlist.modifyModlist` MAY be your friend here for
+            generating modlists.  Do read the note in those docs about
+            :py:attr:`ldap.MOD_DELETE` / :py:attr:`ldap.MOD_ADD` vs.
+            :py:attr:`ldap.MOD_REPLACE` to see whether that will affect you poorly.
+
+
+        Example:
+            Here is an example of constructing a modlist for ``modify_s``:
+
+            >>> import ldap
+            >>> modlist = [
+                (ldap.MOD_ADD, 'mail', [b'user@example.com', b'user+foo@example.com']),
+                (ldap.MOD_REPLACE, 'cn', [b'My Name']),
+                (ldap.MOD_DELETE, 'gecos', None)
+            ]
+
+        Args:
+            dn: the dn of the object to delete
+            modlist: a modlist suitable for ``modify_s``
+
+        Raises:
+            ldap.NO_SUCH_OBJECT: no object with dn of ``dn`` exists in our object store
+            ldap.TYPE_OR_VALUE_EXISTS: you tried to add an value to an attribute, but it was
+                already in the value list
+            ldap.INSUFFICIENT_ACCESS: you need to do a non-anonymous bind before doing this
+        """
         entry = self.directory.get(dn)
         for item in mod_attrs:
             op, key, value = item
@@ -421,11 +467,19 @@ class FakeLDAPObject:
         """
         Delete the object with dn of ``dn`` from our object store.
 
+        Each element in the list modlist should be a tuple of the form
+        ``(mod_type: str, mod_vals: List[bytes])``, where ``mod_type`` is a
+        string indicating the attribute type name, and ``mod_vals`` is either a
+        string value or a list of string values to add, delete or replace
+        respectively. For the delete operation, mod_vals may be ``None``
+        indicating that all attributes are to be deleted.
+
         Args:
             dn: the dn of the object to delete
 
         Raises:
             ldap.NO_SUCH_OBJECT: no object with dn of ``dn`` exists in our object store
+            ldap.INSUFFICIENT_ACCESS: you need to do a non-anonymous bind before doing this
         """
         self.directory.delete(dn)
 
@@ -439,6 +493,7 @@ class FakeLDAPObject:
 
         Raises:
             ldap.NO_SUCH_OBJECT: no object with dn of ``dn`` exists in our object store
+            ldap.INSUFFICIENT_ACCESS: you need to do a non-anonymous bind before doing this
         """
         # change the record into the proper format for the internal directory
         entry = {}
@@ -451,7 +506,31 @@ class FakeLDAPObject:
             self.directory.set(dn, entry)
 
     @record_call
-    def rename_s(self, dn: str, newrdn: str, superior: str = None) -> None:
+    def rename_s(
+        self,
+        dn: str,
+        newrdn: str,
+        newsuperior: str = None,
+        delold: int = 1,
+    ) -> None:
+        """
+        Take ``dn`` (the DN of the entry whose RDN is to be changed, and
+        ``newrdn``, the new RDN to give to the entry. The optional parameter
+        ``newsuperior`` is used to specify a new parent DN for moving an entry
+        in the tree (not all LDAP servers support this).
+
+        Args:
+            dn: the dn of the object to rename
+            newrdn: the new RDN
+
+        Keyword Args:
+            newsuperior: the new basedn
+            delold: if 1, delete the old entry after renaming, if 0, don't.
+
+        Raises:
+            ldap.NO_SUCH_OBJECT: no object with dn of ``dn`` exists in our object store
+            ldap.INSUFFICIENT_ACCESS: you need to do a non-anonymous bind before doing this
+        """
         entry = self.directory.copy(dn)
         if not superior:
             basedn = ','.join(dn.split(',')[1:])

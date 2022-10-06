@@ -162,12 +162,15 @@ class LDAPServerFactory:
 class CallHistory:
     """
     This class records the ``python-ldap`` call history for a particular
-    :py:class:`FakeLDAPObject`.  It works in conjunction with the ``@record_call`` decorator.
-    An :py:class:`CallHistory` object will be configured on each :py:class:`FakeLDAPObject` and on each
-    :py:class:`FakeLDAP` object capture their call history.
+    :py:class:`FakeLDAPObject` as :py:class:`LDAPCallRecord` objects.  It works
+    in conjunction with the ``@record_call`` decorator.  An
+    :py:class:`CallHistory` object will be configured on each
+    :py:class:`FakeLDAPObject` and on each :py:class:`FakeLDAP` object capture
+    their call history.
 
-    Use this in your tests to ensure that your code called the ``python-ldap`` methods you
-    expected, in the order you expected, with the arguments you expected.
+    We use this in our tests with appropriate asserts to ensure that our code
+    called the ``python-ldap`` methods we expected, in the order we expected,
+    with the arguments we expected.
     """
 
     def __init__(self):
@@ -280,9 +283,29 @@ class OptionStore:
         self.options: LDAPOptionStore = {}
 
     def set(self, option: int, invalue: LDAPOptionValue):
+        """
+        Set an option.
+
+        Args:
+            option: the code for the option (e.g. :py:data:`ldap.OPT_X_TLS_NEWCTX`)
+            value: the value we want the option to be set to
+        """
         self.options[option] = invalue
 
     def get(self, option: int, default: LDAPOptionValue = None) -> LDAPOptionValue:
+        """
+        Get the value for a previosly set option that was set via :py:meth:`OptionStore.set`.
+
+        Args:
+            option: the code for the option (e.g. :py:data:`ldap.OPT_X_TLS_NEWCTX`)
+
+        Keyword Args:
+            default: if ``option`` was not previously set on us, return
+                ``default`` instead.
+
+        Returns:
+            The value for the option, or the default.
+        """
         if default is not None:
             return self.options.get(option, default)
         return self.options[option]
@@ -595,7 +618,7 @@ class ObjectStore:
 
     def set(self, dn: str, data: LDAPData) -> None:
         """
-        Overrite the data we have for the object ``dn`` with ``data``:
+        Add or update data for the object with dn ``dn``.
 
         Args:
             dn: the dn of the object to copy.

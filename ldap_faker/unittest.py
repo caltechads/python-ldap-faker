@@ -17,9 +17,20 @@ class LDAPFakerMixin:
     return :py:class:`FakeLDAPObject` objects
     instead of :py:class:`ldap.ldapobject.LDAPObject` objects.
 
+    :py:attr:`ldap_modules` is a list of python module paths in which we should
+    patch :py:func:`ldap.initialize` with our :py:meth:`FakeLDAP.initialize`
+    method.  For example::
+
+        class TestMyStuff(LDAPFakerMixin, unittest.TestCase):
+
+            ldap_modules = ['myapp.module']
+
+    will cause :py:class:`LDAPFakerMixin` to patch
+    ``myapp.module.ldap.initialize``.
+
     :py:attr:`ldap_fixtures` names one or more JSON
     files containing LDAP records to load into a :py:class:`ObjectStore` via
-    `:py:meth:`ObjectStore.load_objects`.  :py:attr:`ldap_fixtures`
+    :py:meth:`ObjectStore.load_objects`.  :py:attr:`ldap_fixtures`
     can be either a single string, or a list of ``Tuple[str, str]``.
 
     If we define our test class like so::
@@ -48,7 +59,7 @@ class LDAPFakerMixin:
     """
 
     ldap_modules: List[str] = []  #: The list of python paths to modules that import ``ldap``
-    ldap_fixtures: Optional[LDAPFixtureList] = None  #: The fixture or fixtures to load into our fake LDAP servers
+    ldap_fixtures: Optional[LDAPFixtureList] = None  #: The filenames of fixtures to load into our fake LDAP servers
 
     def __init__(self, *args, **kwargs):
         self.server_factory: LDAPServerFactory  #: The :py:class:`LDAPServerFactory` configured by our :py:meth:`setUpClass`
