@@ -26,4 +26,4 @@ class TestLDAPFakerMixin(LDAPFakerMixin, unittest.TestCase):
     def test_correct_user_was_bound(self):
         dn = 'uid=user,ou=mydept,o=myorg,c=country'
         self.obj.connect(dn, 'the password')
-        self.assertEqual(self.fake_ldap.connections[0].bound[0], dn)
+        self.assertEqual(self.fake_ldap.connections[0].bound_dn, dn)
