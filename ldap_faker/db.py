@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import dataclass
 import json
 import re
 from typing import List, Dict, Any, Optional, cast
@@ -16,11 +17,48 @@ from .types import (
     LDAPSearchResult,
     LDAPOptionStore,
     LDAPOptionValue,
-    LDAPCallRecord,
     LDAPData,
     RawLDAPObjectStore,
     LDAPRecord,
 )
+
+
+@dataclass
+class LDAPCallRecord:
+    """
+    This is a single LDAP call record, used by :py:class:`CallHistory` to store
+    information about calls to LDAP api functions.
+
+    :py:attr:`api_name` is the name of the LDAP api call made
+    (e.g. ``simple_bind_s``, ``search_s``).
+
+    :py:attr:`args` is the argument list of the call, including defaults for
+    keyword arguments not passed.  This is a dict where the key is the name of
+    the positional or keyword argument, and the value is the passed in (or
+    default) value for that argument.
+
+    Example:
+
+        If we make this call to a patched :py:class:`FakeLDAPObject`::
+
+            ldap_obj.search_s('ou=bar,o=baz,c=country', ldap.SCOPE_SUBTREE, '(uid=foo)')
+
+        This will be recorded as::
+
+            LDAPCallRecord(
+                api_name='search_s',
+                args={
+                    'base': 'ou=bar,o=baz,c=country',
+                    'scope': 2,
+                    'filterstr': '(uid=foo)',
+                    'attrlist': None,
+                    'attrsonly': 0
+                }
+            )
+
+    """
+    api_name: str  #: the name LDAP api call
+    args: Dict[str, Any]   #: the args and kwargs dict
 
 
 class LDAPServerFactory:
@@ -173,8 +211,10 @@ class CallHistory:
     with the arguments we expected.
     """
 
-    def __init__(self):
+    def __init__(self, calls: List[LDAPCallRecord] = None):
         self._calls: List[LDAPCallRecord] = []
+        if calls:
+            self._calls = calls
 
     def register(self, api_name: str, arguments: Dict[str, Any]) -> None:
         """
@@ -188,7 +228,7 @@ class CallHistory:
 
         :meta private:
         """
-        self._calls.append((api_name, arguments))
+        self._calls.append(LDAPCallRecord(api_name, arguments))
 
     def filter_calls(self, api_name: str) -> List[LDAPCallRecord]:
         """
@@ -201,7 +241,7 @@ class CallHistory:
             A list of (``api_name``, ``arguments``) tuples in the order in which the
             calls were made.  Arguments is a ``Dict[str, Any]``.
         """
-        return [call for call in self._calls if call[0] == api_name]
+        return [call for call in self._calls if call.api_name == api_name]
 
     @property
     def calls(self) -> List[LDAPCallRecord]:
@@ -271,7 +311,7 @@ class CallHistory:
         Returns:
             A list of method names, in the order they were called.
         """
-        return [call[0] for call in self._calls]
+        return [call.api_name for call in self._calls]
 
 
 class OptionStore:
