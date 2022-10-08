@@ -12,7 +12,6 @@ from ldap_filter import Filter
 
 from .types import (
     LDAPObjectStore,
-    LDAPSearchDirectory,
     CILDAPData,
     LDAPSearchResult,
     LDAPOptionStore,
@@ -522,80 +521,6 @@ class ObjectStore:
         else:
             raise ldap.ALREADY_EXISTS
 
-    # Canned search results
-
-    def register_search_result(
-        self,
-        base: str,
-        scope: int,
-        filterstr: str,
-        results: LDAPSearchResult
-    ) -> None:
-        """
-        Register a basedn, scope, filter string and the search results that should be
-        returned when someone does an LDAP search with that filter string.
-
-        Note:
-            You can only register search results for ``ldap.SCOPE_ONELEVEL`` and ``ldap.SCOPE_SUBTREE``
-            searches; to handle ``ldap.SCOPE_BASE``, just add the object to the object store with
-            :py:meth:`.ObjectStore.register_object`.
-
-        Example:
-            To register a search for the following call:
-
-                >>> ldap_obj.search_s('ou=foo,o=bar,c=baz', ldap.SCOPE_SUBTREE, '(attr2=my-value)`)
-
-            Do:
-
-                >>> results = [
-                    (
-                        'cn=fred,ou=foo,o=bar,c=baz',
-                        {
-                            'cn': [b'fred'],
-                            'attr2': [b'my-value']
-                        }
-                    ),
-                    (
-                        'cn=barney,ou=foo,o=bar,c=baz',
-                        {
-                            'cn': [b'barney'],
-                            'attr2': [b'my-value']
-                        }
-                    )
-                ]
-                >>> directory = ObjectStore()
-                >>> directory.register_search_result(
-                    'ou=foo,o=bar,c=baz',
-                    ldap.SCOPE_SUBTREE,
-                    '(attr2=my-value)',
-                    results
-                )
-
-        Args:
-            base: the base dn for the search
-            scope: the scope for the search
-            filterstr: the filter string for the search
-            results: the list of objects that should be returned when a search with this
-                ``base``, ``scope`` and ``filterstr`` is performed
-        """
-        if scope not in [ldap.SCOPE_ONELEVEL, ldap.SCOPE_SUBTREE]:
-            raise ValueError(
-                'You may only register search results for ldap.SCOPE_ONELEVEL '
-                'and ldap.SCOPE_SUBTREE searches.  Use ObjectStore.register_object() to '
-                'register objects returned in ldap.SCOPE_BASE searches.'
-            )
-        key = f'{base}:{scope}:{filterstr}'
-        self.searches[key] = results
-
-    def __get_search_result(
-        self,
-        base: str,
-        scope: int,
-        filterstr: str,
-    )  -> LDAPSearchResult:
-        key = f'{base}:{scope}:{filterstr}'
-        return self.searches[key]
-
     # Helpers
 
     def __is_default_filter(self, filterstr: str) -> bool:
@@ -779,10 +704,6 @@ class ObjectStore:
         Returns:
             A list of LDAP objects -- 2-tuples of (dn, data).
         """
-        try:
-            return self.__get_search_result(base, ldap.SCOPE_ONELEVEL, filterstr)
-        except KeyError:
-            pass
         basedn_parts = ldap.dn.explode_dn(base.lower(), flags=ldap.DN_FORMAT_LDAPV3)
         filt = None
         if not self._DEFAULT_SEARCH_RE.search(filterstr):
@@ -819,10 +740,6 @@ class ObjectStore:
         Returns:
             A list of LDAP objects -- 2-tuples of (dn, data).
         """
-        try:
-            return self.__get_search_result(base, ldap.SCOPE_SUBTREE, filterstr)
-        except KeyError:
-            pass
         basedn_parts = ldap.dn.explode_dn(base.lower(), flags=ldap.DN_FORMAT_LDAPV3)
         filt = None
         if not self._DEFAULT_SEARCH_RE.search(filterstr):
