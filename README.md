@@ -152,7 +152,7 @@ Then we can write a `TestCase` that looks like this:
             app = App()
             app.auth('fred', 'the fredpassword')
             conn = self.get_connections()[0]
-            self.assertLDAPConnectionOptionSet(ldap.OPT_X_TLX_NEWCTX, 0)
+            self.assertLDAPConnectionOptionSet(conn, ldap.OPT_X_TLX_NEWCTX, 0)
 
         def test_tls_was_used_before_auth(self):
             app = App()
