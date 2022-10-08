@@ -4,7 +4,7 @@ from functools import wraps
 import inspect
 import json
 import sys
-from typing import Any, Dict, List, Optional, TextIO, Tuple
+from typing import Any, Dict, List, Optional, TextIO, cast
 
 import ldap
 
@@ -20,7 +20,8 @@ from .types import (
     LDAPOptionValue,
     LDAPRecord,
     ModList,
-    AddModList
+    AddModList,
+    Result3
 )
 
 
@@ -210,7 +211,7 @@ class FakeLDAP:
         Returns:
             The value currently set for the option.
         """
-        return self.options.get(option, ldap.get_option(option))
+        return self.options.get(option)
 
     # Test instrumentation
 
@@ -310,18 +311,62 @@ class FakeLDAPObject:
         self.tls_enabled: bool = False  #: Set to True if :py:meth:`start_tls_s` was called
         self.bound_dn: Optional[str] = None  #: Set by :py:meth:`simple_bind_s` to the dn of the user after success
 
+        # Other standard LDAPObject attributes that test code might look at
+        self.deref: int = ldap.DEREF_NEVER  #: Controls whether aliases are automatically dereferenced (always :py:attr:`ldap.DEREF_NEVER`).
+        self.protocol_version: int = ldap.VERSION3  #: Version of LDAP in use (always :py:attr:`ldap.VERSION3``)
+        self.sizelimit: int = ldap.NO_LIMIT  #: Limit on size of message to receive from server
+        self.network_timeout: int = ldap.NO_LIMIT  #: Limit on waiting for a network response, in seconds.
+        self.timelimit: int = ldap.NO_LIMIT  #: Limit on waiting for any response, in seconds.
+        self.timeout: int = ldap.NO_LIMIT  #: Limit on waiting for any response, in seconds.
+
     # LDAPObject methods
 
     @record_call
     def set_option(self, option: int, invalue: LDAPOptionValue) -> None:
+        """
+        This method sets the value of the
+        :py:class:`ldap.ldap.ldapobject.LDAPObject`` option specified by
+        ``option`` to ``invalue``.
+
+        Args:
+            option: the option
+            value: the value to set the option to
+
+        Raises:
+            ValueError: ``option`` is not a valid ``python-ldap`` option
+        """
         self.options.set(option, invalue)
 
     @record_call
     def get_option(self, option: int) -> LDAPOptionValue:
+        """
+        This method returns the value of the
+        :py:class:`ldap.ldap.ldapobject.LDAPObject`` option specified by
+        ``option``.
+
+        .. note::
+            If your code did not call :py:meth:`FakeLDAPOption.set_option` for this option,
+            we'll return the default value from ``python-ldap``.
+
+        Args:
+            option: the option
+
+        Raises:
+            ValueError: ``option`` is not a valid ``python-ldap`` option
+
+        Returns:
+            The value of the option
+        """
         return self.options.get(option)
 
     @record_call
-    def simple_bind_s(self, who: str = '', cred: str = '') -> None:
+    def simple_bind_s(
+        self,
+        who: str = None,
+        cred: str = None,
+        serverctrls: List[ldap.controls.LDAPControl] = None,
+        clientctrls: List[ldap.controls.LDAPControl] = None,
+    ) -> Optional[Result3]:
         """
         Perform a bind.  This will look in the object store for an object with dn of
         ``who`` and compare ``cred`` to the ``userPassword`` attribute for that
@@ -334,12 +379,13 @@ class FakeLDAPObject:
         Raises:
             ldap.INVALID_CREDENTIALS: the ``who`` did not match the ``cred``
         """
-        if (who == '' and cred == ''):
-            return
-
-        if self.store.exists(who) and self._compare_s(who.lower(), 'userPassword', cred):
+        if (who is None and cred is None):
+            return None
+        who = cast(str, who)
+        cred = cast(str, cred)
+        if self.store.exists(who) and self.compare_s(who.lower(), 'userPassword', cred.encode('utf-8')):
             self.bound_dn = who
-            return
+            return (ldap.RES_BIND, [], 3, [])
         raise ldap.INVALID_CREDENTIALS({
             'msgtype': 97,
             'msgid': 2,
@@ -347,6 +393,22 @@ class FakeLDAPObject:
             'desc': 'Invalid credentials',
             'ctrls': []
         })
+
+    @record_call
+    def whoami_s(self) -> str:
+        """
+        This synchronous method implements the LDAP “Who Am I?” extended
+        operation.
+
+        It is useful for finding out to find out which identity is assumed by
+        the LDAP server after a bind.
+
+        Returns:
+            Empty string if we haven't bound as an identity, otherwise "dn: {the dn}"
+        """
+        if self.bound_dn:
+            return f'dn: {self.bound_dn}'
+        return ''
 
     @record_call
     def search_ext(
@@ -376,7 +438,20 @@ class FakeLDAPObject:
         msgid: int = ldap.RES_ANY,
         all: int = 1,
         timeout: int = None
-    ) -> Tuple[int, List[LDAPRecord], int, List[ldap.controls.LDAPControl]]:
+    ) -> Result3:
+        """
+        Retrieve the results of our :py:meth:`FakeLDAPObject.search_ext` call.
+
+        .. note::
+            The ``all`` and ``timeout`` keyword arguments are ignored here.
+
+        Keyword Args:
+            msgid: the ``msgid`` returned by the :py:meth:`FakeLDAPObject.search_ext` call
+            all: if 1, return all results at once; if 0, return them one at a time (ignored)
+
+        Returns:
+            A :py:func:`ldap.result3` 4-tuple.
+        """
         if self._async_results:
             if msgid == ldap.RES_ANY:
                 msgid = list(self._async_results.keys())[0]
@@ -401,6 +476,15 @@ class FakeLDAPObject:
         return self._search_s(base, scope, filterstr, attrlist, attrsonly)
 
     def start_tls_s(self) -> None:
+        """
+        Negotiate TLS with server.
+
+        This sets our :py:attr:`tls_enabled` attribute to ``True``.
+
+        Raises:
+            ldap.LOCAL_ERROR: :py:meth:`start_tls_s` was done twice on the same
+                connection
+        """
         if not self.tls_enabled:
             self.tls_enabled = True
         else:
@@ -415,12 +499,33 @@ class FakeLDAPObject:
             )
 
     @record_call
-    def compare_s(self, dn: str, attr: str, value: Any) -> bool:
-        return self._compare_s(dn, attr, value)
+    def compare_s(self, dn: str, attr: str, value: bytes) -> bool:
+        """
+        Perform an LDAP comparison between the attribute named ``attr`` of entry
+        ``dn``, and the value ``value``.   For multi-valued attributes, the test
+        is whether any of the values match ``value``.
+
+        Args:
+            dn: the dn of the object to look at
+            attr: the name of the attribute on our object to compare
+            value: the value to which to compare the object value
+
+        Raises:
+            ldap.NO_SUCH_OBJECT: no object with dn of ``dn`` exists in our object store
+
+        Returns:
+            ``True`` if the values are equal, ``False`` otherwise.
+        """
+        if not isinstance(value, bytes):
+            raise TypeError(f"a bytes-like object is required, not '{type(value)}'")
+        try:
+            return value in self.store.get(dn)[attr]
+        except KeyError:
+            return False
 
     @needs_bind
     @record_call
-    def modify_s(self, dn, modlist: ModList) -> None:
+    def modify_s(self, dn, modlist: ModList) -> Result3:
         """
         Modify the object with dn of ``dn`` using the modlist ``modlist``.
 
@@ -459,31 +564,12 @@ class FakeLDAPObject:
             ldap.TYPE_OR_VALUE_EXISTS: you tried to add an value to an attribute, but it was
                 already in the value list
             ldap.INSUFFICIENT_ACCESS: you need to do a non-anonymous bind before doing this
+
+        Returns:
+            A :py:func:`ldap.result3` type 4-tuple.
         """
-        entry = self.directory.get(dn)
-        for item in mod_attrs:
-            op, key, value = item
-            if op == ldap.MOD_ADD:
-                if key not in entry:
-                    entry[key] = value
-                else:
-                    # TODO: note we're not dealing with multi-valued attributes
-                    # that need unique items here
-                    entry[key].extend(value)
-            elif op == ldap.MOD_DELETE:
-                # do a MOD_DELETE
-                row = entry[key]
-                if isinstance(row, list):
-                    for i in range(len(row)):
-                        if value == row[i]:
-                            del row[i]
-                else:
-                    del entry[key]
-                self.directory.set(dn, entry)
-            elif op == ldap.MOD_REPLACE:
-                # do a MOD_REPLACE
-                entry[key] = value
-        self.directory.set(dn, entry)
+        self.store.update(dn, modlist)
+        return (ldap.RES_MODIFY, [], 3, [])
 
     @needs_bind
     @record_call
@@ -511,24 +597,36 @@ class FakeLDAPObject:
     @record_call
     def add_s(self, dn: str, modlist: AddModList) -> None:
         """
-        Delete the object with dn of ``dn`` from our object store.
+        Add an object with dn of ``dn``.
+
+        ``modlist`` is similar the one passed to :py:meth:`modify_s`, except
+        that the operation integer is omitted from the tuples in ``modlist``. You
+        might want to look into sub-module refmodule{ldap.modlist} for
+        generating the modlist.
+
+        Example:
+            Here is an example of constructing a modlist for ``add_s``:
+
+            >>> modlist = [
+                ('uid', [b'user']),
+                ('gidNumber', [b'1000']),
+                ('uidNumber', [b'1000']),
+                ('loginShell', [b'/bin/bash']),
+                ('homeDirectory', [b'/home/user']),
+                ('userPassword', [b'the password']),
+                ('cn', [b'My Name']),
+                ('objectClass', [b'top', b'posixAccount']),
+            ]
 
         Args:
-            dn: the dn of the object to delete
+            dn: the dn of the object to add
+            modlist: the add modlist
 
         Raises:
-            ldap.NO_SUCH_OBJECT: no object with dn of ``dn`` exists in our object store
+            ldap.ALREADY_EXISTS: an object with dn of ``dn`` already exists in our object store
             ldap.INSUFFICIENT_ACCESS: you need to do a non-anonymous bind before doing this
         """
-        # change the record into the proper format for the internal directory
-        entry = {}
-        for item in modlist:
-            entry[item[0]] = item[1]
-        try:
-            self.store.get(dn)
-            raise ldap.ALREADY_EXISTS({'info': '', 'desc': 'Object already exists'})
-        except KeyError:
-            self.store.set(dn, entry)
+        self.store.create(dn, modlist)
 
     @needs_bind
     @record_call
@@ -538,6 +636,8 @@ class FakeLDAPObject:
         newrdn: str,
         newsuperior: str = None,
         delold: int = 1,
+        serverctrls: List[ldap.controls.LDAPControl] = None,
+        clientctrls: List[ldap.controls.LDAPControl] = None,
     ) -> None:
         """
         Take ``dn`` (the DN of the entry whose RDN is to be changed, and
@@ -571,18 +671,16 @@ class FakeLDAPObject:
 
     @record_call
     def unbind_s(self) -> None:
+        """
+        Unbind from the server.
+
+        This sets our :py:attr:`bound_dn` to ``None``.
+        """
         self.bound_dn = None
 
     #
     # Internal implementations
     #
-
-    def _compare_s(self, dn: str, attr: str, value: Any) -> bool:
-        try:
-            found = value.encode('utf-8') in self.store.get(dn)[attr]
-        except KeyError:
-            found = False
-        return found
 
     def _search_s(
         self,

@@ -4,13 +4,15 @@ from copy import deepcopy
 from dataclasses import dataclass
 import json
 import re
-from typing import List, Dict, Any, Optional, cast
+from typing import List, Dict, Any, Optional, Set, cast
 import warnings
 
 import ldap
 from ldap_filter import Filter
+from ldap_filter.parser import ParseError
 
 from .types import (
+    AddModList,
     LDAPObjectStore,
     CILDAPData,
     LDAPSearchResult,
@@ -19,6 +21,7 @@ from .types import (
     LDAPData,
     RawLDAPObjectStore,
     LDAPRecord,
+    ModList
 )
 
 
@@ -319,32 +322,36 @@ class OptionStore:
     def __init__(self):
         self.options: LDAPOptionStore = {}
 
-    def set(self, option: int, invalue: LDAPOptionValue):
+    def set(self, option: int, invalue: LDAPOptionValue) -> None:
         """
         Set an option.
 
         Args:
             option: the code for the option (e.g. :py:data:`ldap.OPT_X_TLS_NEWCTX`)
             value: the value we want the option to be set to
+
+        Raises:
+            ValueError: ``option`` is not a valid ``python-ldap`` option
         """
+        if option not in ldap.OPT_NAMES_DICT:
+            raise ValueError(f'unknown option {option}')
         self.options[option] = invalue
 
-    def get(self, option: int, default: LDAPOptionValue = None) -> LDAPOptionValue:
+    def get(self, option: int) -> LDAPOptionValue:
         """
         Get the value for a previosly set option that was set via :py:meth:`OptionStore.set`.
 
         Args:
             option: the code for the option (e.g. :py:data:`ldap.OPT_X_TLS_NEWCTX`)
 
-        Keyword Args:
-            default: if ``option`` was not previously set on us, return
-                ``default`` instead.
+        Raises:
+            ValueError: ``option`` is not a valid ``python-ldap`` option
 
         Returns:
             The value for the option, or the default.
         """
-        if default is not None:
-            return self.options.get(option, default)
+        if option not in self.options:
+            return ldap.get_option(option)
         return self.options[option]
 
 
@@ -367,7 +374,6 @@ class ObjectStore:
         # names and values are compared as case-insensitive, and Filter.match()
         # expects the filter and values to be strings
         self.objects: LDAPObjectStore = LDAPObjectStore()  #: LDAP records set up to make searching better
-        self.searches: LDAPSearchDirectory = LDAPSearchDirectory()
 
     def __convert_LDAPData(self, data: LDAPData) -> CILDAPData:
         """
@@ -407,6 +413,11 @@ class ObjectStore:
 
         Args:
             filename: the path to the JSON file to load
+
+        Raises:
+            ldap.ALREADY_EXISTS: there is already an object in our object store
+                with this dn
+            ldap.INVALID_DN_SYNTAX: one of the object DNs is not well formed
         """
         with open(filename, 'r', encoding='utf-8') as fd:
             objects = json.load(fd)
@@ -469,6 +480,8 @@ class ObjectStore:
         Raises:
             ldap.ALREADY_EXISTS: there is already an object in our object store
                 with this dn
+            ldap.INVALID_DN_SYNTAX: one of the object DNs is not well formed
+            TypeError: the LDAPData portion for an object was not of type ``Dict[str, List[bytes]]``
         """
         for obj in objs:
             self.register_object(obj)
@@ -500,7 +513,6 @@ class ObjectStore:
                 >>> directory = ObjectStore()
                 >>> directory.register_object(obj)
 
-
         Args:
             obj: An LDAP record as it would have been returned by
                 ``ldap.ldapobject.LDAPObject.search_s()``.  This is a 2-tuple, where
@@ -511,15 +523,12 @@ class ObjectStore:
         Raises:
             ldap.ALREADY_EXISTS: there is already an object in our object store
                 with this dn
+            ldap.INVALID_DN_SYNTAX: the DN is not well formed
+            TypeError: the LDAPData portion was not of type ``Dict[str, List[bytes]]``
         """
-        dn, data = obj
-        if not ldap.dn.is_dn(dn):
-            raise ValueError(f'"{dn}" is not a valid LDAP dn')
-        if dn not in self.objects:
-            self.raw_objects[dn] = data
-            self.objects[dn] = self.__convert_LDAPData(data)
-        else:
+        if self.exists(obj[0]):
             raise ldap.ALREADY_EXISTS
+        self.set(obj[0], obj[1])
 
     # Helpers
 
@@ -538,6 +547,68 @@ class ObjectStore:
             return True
         return False
 
+    def __check_bytes(self, value: Any) -> None:
+        """
+        Check a value list, ensuring that we got ``List[bytes]`` and not another type.
+
+        Args:
+            value: the value to check
+
+        Raises:
+            TypeError: ``value`` is not a ``List[bytes]``
+        """
+        for v in value:
+            if not isinstance(v, bytes):
+                raise TypeError(f"('Tuple_to_LDAPMod(): expected a byte string in the list', '{v}')")
+
+    def __validate_dn(self, dn: str, operation: int = ldap.RES_ANY) -> None:
+        """
+        Validate that ``dn`` is a well formed DN.
+
+        Args:
+            dn: the DN to validate
+
+        Keyword Args:
+            operation: the ``msgtype`` to set on the exception
+
+        Raises:
+            ldap.INVALID_DN_SYNTAX: the dn was not well-formed
+        """
+        if not ldap.dn.is_dn(dn):
+            raise ldap.INVALID_DN_SYNTAX({
+                'msgtype': operation,
+                'msgid': 3,
+                'result': 34,
+                'desc': 'Invalid DN syntax',
+                'ctrls': [],
+                'info': 'DN value invalid per syntax\n'
+            })
+
+    def __validate_LDAPRecord(self, obj: LDAPRecord) -> None:
+        dn, data = obj
+        self.__validate_dn(dn)
+        for attr, value in data.items():
+            if not isinstance(attr, str):
+                raise TypeError(f"attributes must be of type str: '{attr!r}'")
+            if not isinstance(value, list):
+                raise TypeError(f"values nust be of type List[bytes]: '{value!r}'")
+            for v in value:
+                if not isinstance(v, bytes):
+                    raise TypeError(f"values nust be of type List[bytes]: '{v!r}'")
+
+    def __parse_filterstr(self, filterstr: str) -> Filter:
+        try:
+            filt = Filter.parse(filterstr)
+        except ParseError as exc:
+            raise ldap.FILTER_ERROR({
+                'result': -7,
+                'desc': 'Bad search filter',
+                'errno': 35,
+                'ctrls': [],
+                'info': 'Resource temporarily unavailable'
+            }) from exc
+        return filt
+
     # Main methods
 
     @property
@@ -555,6 +626,7 @@ class ObjectStore:
             ``True`` if the object exists, ``False`` otherwise.
 
         """
+        self.__validate_dn(dn, ldap.RES_SEARCH_ENTRY)
         return dn in self.objects
 
     def get(self, dn: str) -> LDAPData:
@@ -570,6 +642,7 @@ class ObjectStore:
         Returns:
             The data for an LDAP object
         """
+        self.__validate_dn(dn, ldap.RES_SEARCH_ENTRY)
         try:
             return self.raw_objects[dn]
         except KeyError as exc:
@@ -595,6 +668,7 @@ class ObjectStore:
         Returns:
             The data for an LDAP object
         """
+        self.__validate_dn(dn, ldap.RES_SEARCH_ENTRY)
         return deepcopy(self.get(dn))
 
     def set(self, dn: str, data: LDAPData) -> None:
@@ -604,9 +678,162 @@ class ObjectStore:
         Args:
             dn: the dn of the object to copy.
             data: the dict of data for this object
+
+        Raises:
+            ldap.INVALID_DN_SYNTAX: the DN is not well formed
+            TypeError: the LDAPData portion was not of type ``Dict[str, List[bytes]]``
         """
+        self.__validate_LDAPRecord((dn, data))
         self.raw_objects[dn] = data
         self.objects[dn] = self.__convert_LDAPData(data)
+
+    def update(self, dn: str,  modlist: ModList) -> None:
+        """
+        Modify the object with dn of ``dn`` using the modlist ``modlist``.
+
+        Each element in the list modlist should be a tuple of the form
+        ``(mod_op: int, mod_type: str, mod_vals: Union[bytes, List[bytes]])``, where
+        ``mod_op`` indicates the operation (one of :py:attr:`ldap.MOD_ADD`,
+        :py:attr:`ldap.MOD_DELETE`, or :py:attr:`ldap.MOD_REPLACE`, ``mod_type``
+        is a string indicating the attribute type name, and ``mod_vals`` is
+        either a bytes value or a list of bytes values to add, delete or
+        replace respectively. For the delete operation, ``mod_vals`` may be ``None``
+        indicating that all attributes are to be deleted.
+
+        Note:
+            :py:func:`ldap.modlist.modifyModlist` MAY be your friend here for
+            generating modlists.  Do read the note in those docs about
+            :py:attr:`ldap.MOD_DELETE` / :py:attr:`ldap.MOD_ADD` vs.
+            :py:attr:`ldap.MOD_REPLACE` to see whether that will affect you poorly.
+
+
+        Example:
+            Here is an example of constructing a modlist for ``modify_s``:
+
+            >>> import ldap
+            >>> modlist = [
+                (ldap.MOD_ADD, 'mail', [b'user@example.com', b'user+foo@example.com']),
+                (ldap.MOD_REPLACE, 'cn', [b'My Name']),
+                (ldap.MOD_DELETE, 'gecos', None)
+            ]
+
+        Args:
+            dn: the dn of the object to delete
+            modlist: a modlist suitable for ``modify_s``
+
+        Raises:
+            ldap.INVALID_DN_SYNTAX: the dn was not well-formed
+            ldap.NO_SUCH_OBJECT: no object with dn of ``dn`` exists in our
+                object store
+            ldap.TYPE_OR_VALUE_EXISTS: you tried to add an value to an
+                attribute, but it was already in the value list
+            ldap.INSUFFICIENT_ACCESS: you need to do a non-anonymous bind before
+                doing this
+        """
+
+        def get_overlaps(source: List[bytes], other: List[bytes]) -> Set[bytes]:
+            """
+            Given two lists of bytes, return a set of the items that are in
+            both, ignoring the case of the values.
+
+            Args:
+                source: the source list
+                other: the list of values to compare with
+
+            Returns:
+                The list of items that are in both.  These items will be lowercased.
+            """
+            current = {v.lower() for v in source}
+            updates = {v.lower() for v in other}
+            return current.intersection(updates)
+
+        self.__validate_dn(dn, ldap.RES_MODIFY)
+        obj = self.get(dn)
+        for item in modlist:
+            op, key, value = item
+            if op not in (ldap.MOD_ADD, ldap.MOD_DELETE, ldap.MOD_REPLACE):
+                raise ldap.PROTOCOL_ERROR({
+                    'msgtype': ldap.RES_MODIFY,
+                    'msgid': 4,
+                    'result': 2,
+                    'desc': 'Protocol error',
+                    'info': 'unrecognized modify operation',
+                    'ctrls': []
+                })
+            if op == ldap.MOD_ADD:
+                self.__check_bytes(value)
+                if key not in obj:
+                    obj[key] = value
+                else:
+                    # Enforce case-insensitive uniqueness in the value list
+                    overlaps = get_overlaps(obj[key], value)
+                    if not overlaps:
+                        obj[key].extend(value)
+                    else:
+                        raise ldap.TYPE_OR_VALUE_EXISTS({
+                            'msgtype': ldap.RES_MODIFY,
+                            'msgid': 4,
+                            'result': 20,
+                            'desc': 'Type or value exists',
+                            'ctrls': []
+                        })
+            elif op == ldap.MOD_DELETE:
+                if value is None:
+                    # If value was None, delete the whole attribute
+                    del obj[key]
+                else:
+                    # otherwise just remove the values from value from obj[key]
+                    self.__check_bytes(value)
+                    overlaps = get_overlaps(obj[key], value)
+                    obj[key] = [v for v in obj[key] if v.lower() not in overlaps]
+            elif op == ldap.MOD_REPLACE:
+                self.__check_bytes(value)
+                obj[key] = value
+        self.set(dn, obj)
+
+    def create(self, dn: str, modlist: AddModList) -> None:
+        """
+        Create an object in our store with dn of ``dn``.
+
+        ``modlist`` is similar the one passed to :py:meth:`modify_s`, except
+        that the operation integer is omitted from the tuples in ``modlist``. You
+        might want to look into sub-module refmodule{ldap.modlist} for
+        generating the modlist.
+
+        Example:
+            Here is an example of constructing a modlist for ``create``:
+
+            >>> modlist = [
+                ('uid', [b'user']),
+                ('gidNumber', [b'1000']),
+                ('uidNumber', [b'1000']),
+                ('loginShell', [b'/bin/bash']),
+                ('homeDirectory', [b'/home/user']),
+                ('userPassword', [b'the password']),
+                ('cn', [b'My Name']),
+                ('objectClass', [b'top', b'posixAccount']),
+            ]
+
+        Args:
+            dn: the dn of the object to add
+            modlist: the add modlist
+
+        Raises:
+            ldap.INVALID_DN_SYNTAX: the dn was not well-formed
+            ldap.ALREADY_EXISTS: an object with dn of ``dn`` already exists in our object store
+            ldap.INSUFFICIENT_ACCESS: you need to do a non-anonymous bind before doing this
+        """
+        self.__validate_dn(dn, ldap.RES_ADD)
+        if self.exists(dn):
+            raise ldap.ALREADY_EXISTS({'info': '', 'desc': 'Object already exists'})
+        entry = {}
+        for item in modlist:
+            attr, value = item
+            if not isinstance(attr, str):
+                raise TypeError(f'Tuple_to_LDAPMod() argument 1 must be str, not {type(attr)}')
+            self.__check_bytes(value)
+            entry[attr] = value
+        self.set(dn, entry)
 
     def delete(self, dn: str) -> None:
         """
@@ -614,7 +841,11 @@ class ObjectStore:
 
         Args:
             dn: the dn of the object to delete
+
+        Raises:
+            ldap.INVALID_DN_SYNTAX: the dn was not well-formed
         """
+        self.__validate_dn(dn, ldap.RES_DELETE)
         try:
             del self.objects[dn]
             del self.raw_objects[dn]
@@ -625,7 +856,7 @@ class ObjectStore:
         """
         Return just the attributes on ``obj`` named in ``attrlist``.   If
         ``attrlist`` is ``None`` or "``*``"  is in ``attrlist``, return all
-        attributes on ``obj``.
+    attributes on ``obj``.
 
         Note:
             We're doing a pretty simplistic implementation of this here, and we
@@ -664,17 +895,20 @@ class ObjectStore:
             attrlist: the list of attributes to return for each object
 
         Raises:
+            ldap.INVALID_DN_SYNTAX: ``base`` was not a well-formed DN
+            ldap.FILTER_ERROR: ``filterstr`` is has bad filter syntax
             ldap.NO_SUCH_OBJECT: no object with dn of ``base`` exists in the object store
 
         Returns:
             A list with one element -- the object with dn of ``base``.
 
         """
+        self.__validate_dn(base, ldap.RES_SEARCH_RESULT)
         data = self.get(base)
         ci_data = self.objects[base]
         results: LDAPSearchResult = []
         if not self.__is_default_filter(filterstr):
-            filt = Filter.parse(filterstr)
+            filt = self.__parse_filterstr(filterstr)
             if filt.match(ci_data):
                 # We need to do the filter against the the case-insensitive versions of our
                 # attribute names, because that's how LDAP works.  Filter.match() will take
@@ -701,13 +935,18 @@ class ObjectStore:
         Keyword Args:
             attrlist: the list of attributes to return for each object
 
+        Raises:
+            ldap.INVALID_DN_SYNTAX: ``base`` was not a well-formed DN
+            ldap.FILTER_ERROR: ``filterstr`` is has bad filter syntax
+
         Returns:
             A list of LDAP objects -- 2-tuples of (dn, data).
         """
+        self.__validate_dn(base, ldap.RES_SEARCH_RESULT)
         basedn_parts = ldap.dn.explode_dn(base.lower(), flags=ldap.DN_FORMAT_LDAPV3)
         filt = None
         if not self._DEFAULT_SEARCH_RE.search(filterstr):
-            filt = Filter.parse(filterstr)
+            filt = self.__parse_filterstr(filterstr)
         results: LDAPSearchResult = []
         for dn, data in self.objects.items():
             dn_parts = ldap.dn.explode_dn(dn.lower(), flags=ldap.DN_FORMAT_LDAPV3)
@@ -737,13 +976,18 @@ class ObjectStore:
         Keyword Args:
             attrlist: the list of attributes to return for each object
 
+        Raises:
+            ldap.INVALID_DN_SYNTAX: ``base`` was not a well-formed DN
+            ldap.FILTER_ERROR: ``filterstr`` is has bad filter syntax
+
         Returns:
             A list of LDAP objects -- 2-tuples of (dn, data).
         """
+        self.__validate_dn(base, ldap.RES_SEARCH_RESULT)
         basedn_parts = ldap.dn.explode_dn(base.lower(), flags=ldap.DN_FORMAT_LDAPV3)
         filt = None
         if not self._DEFAULT_SEARCH_RE.search(filterstr):
-            filt = Filter.parse(filterstr)
+            filt = self.__parse_filterstr(filterstr)
         results: LDAPSearchResult = []
         for dn, data in self.objects.items():
             dn_parts = ldap.dn.explode_dn(dn.lower(), flags=ldap.DN_FORMAT_LDAPV3)

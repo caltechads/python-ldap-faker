@@ -187,10 +187,23 @@ class LDAPFakerMixin:
 
     # Helpers
 
+    def last_connection(self) -> Optional[FakeLDAPObject]:
+        """
+        Return the :py:class:`FakeLDAPObject` for the last connection made
+        during ourtest.  Hopefully a useful shortcut for when we only make one
+        connection.
+
+        Returns:
+            The last connection made
+        """
+        if self.fake_ldap.connections:
+            return self.fake_ldap.connections[-1]
+        return None
+
     def get_connections(self, uri: str = None) -> List[FakeLDAPObject]:
         """
-        Return a the list of :py:class:`FakeLDAPObject` objects generated during our test,
-        optionally filtered by LDAP URI.
+        Return a the list of :py:class:`FakeLDAPObject` objects generated during
+        our test, optionally filtered by LDAP URI.
 
         Keyword Args:
             uri: the LDAP URI by which to filter our connections
