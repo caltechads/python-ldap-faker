@@ -1,3 +1,6 @@
+.. module:: ldap_faker
+  :noindex:
+
 =================
 python-ldap-faker
 =================
@@ -45,7 +48,7 @@ Features:
     * ``ldap.set_option``
     * ``ldap.get_option``
 `
-* These `ldap.ldapobject.LDAPObject` methods are faked:
+* These ``ldap.ldapobject.LDAPObject`` methods are faked:
 
     * ``set_option``
     * ``get_option``
