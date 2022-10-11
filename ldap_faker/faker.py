@@ -5,6 +5,7 @@ import inspect
 import json
 import sys
 from typing import Any, Dict, List, Optional, TextIO, cast
+from urllib.parse import urlparse
 
 import ldap
 
@@ -294,11 +295,13 @@ class FakeLDAPObject:
         store: ObjectStore = None,
     ):
         # cookie and _async_results are used for the paged search implementation
-        self.cookie: int = 0
+        self.current_msgid: int = 0
         self._async_results: Dict[int, Dict[str, ldap.controls.LDAPControl]] = {}
 
         # This is the URI to which we connected
         self.uri: str = uri  #: the LDAP URI for this connection
+        self.hostname = urlparse(self.uri).netloc  #: the host:port for this connection
+
         self.options: OptionStore  = OptionStore()  #: we store data from :py:meth:`set_option` calls here
         # directory is our our prepared LDAP data objects and faked searches
         self.store: ObjectStore  #: our copy of our ObjectStore for this connection
@@ -346,17 +349,22 @@ class FakeLDAPObject:
 
         .. note::
             If your code did not call :py:meth:`FakeLDAPOption.set_option` for this option,
-            we'll return the default value from ``python-ldap``.
+            we'll get ``KeyError``
 
         Args:
             option: the option
 
         Raises:
             ValueError: ``option`` is not a valid ``python-ldap`` option
+            KeyError: ``option`` is not a valid ``python-ldap`` option
 
         Returns:
             The value of the option
         """
+        if option == ldap.OPT_URI:
+            return self.uri
+        if option == ldap.OPT_HOST_NAME:
+            return self.hostname
         return self.options.get(option)
 
     @record_call
@@ -383,7 +391,7 @@ class FakeLDAPObject:
             return None
         who = cast(str, who)
         cred = cast(str, cred)
-        if self.store.exists(who) and self.compare_s(who.lower(), 'userPassword', cred.encode('utf-8')):
+        if self.store.exists(who, validate=False) and self.compare_s(who.lower(), 'userPassword', cred.encode('utf-8')):
             self.bound_dn = who
             return (ldap.RES_BIND, [], 3, [])
         raise ldap.INVALID_CREDENTIALS({
@@ -423,20 +431,20 @@ class FakeLDAPObject:
         timeout: int = -1,
         sizelimit: int = 0
     ) -> int:
-        msgid = self.cookie
+        msgid = self.current_msgid
         serverctrls[0].cookie = b'%d' % msgid  # type: ignore
-        self._async_results[self.cookie] = {}
-        self._async_results[self.cookie]['ctrls'] = serverctrls
+        self._async_results[msgid] = {}
+        self._async_results[msgid]['ctrls'] = serverctrls
         value = self._search_s(base, scope, filterstr, attrlist, attrsonly)
-        self._async_results[self.cookie]['data'] = value
-        self.cookie += 1
+        self._async_results[msgid]['data'] = value
+        self.current_msgid += 1
         return msgid
 
     @record_call
     def result3(
         self,
         msgid: int = ldap.RES_ANY,
-        all: int = 1,
+        all: int = 1,  # pylint: disable=redefined-builtin
         timeout: int = None
     ) -> Result3:
         """
@@ -475,6 +483,7 @@ class FakeLDAPObject:
     ) -> List[LDAPRecord]:
         return self._search_s(base, scope, filterstr, attrlist, attrsonly)
 
+    @record_call
     def start_tls_s(self) -> None:
         """
         Negotiate TLS with server.

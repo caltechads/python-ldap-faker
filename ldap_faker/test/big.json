@@ -1,0 +1,106 @@
+[
+    [
+        "uid=user,ou=mydept,o=myorg,c=country",
+        {
+            "cn": ["Firstname User1"],
+            "uid": ["user"],
+            "uidNumber": ["123"],
+            "gidNumber": ["456"],
+            "homeDirectory": ["/home/user"],
+            "loginShell": ["/bin/bash"],
+            "userPassword": ["the password"],
+            "objectclass": ["posixAccount", "top"]
+        }
+    ],
+    [
+        "uid=user2,ou=mydept,o=myorg,c=country",
+        {
+            "cn": ["Firstname User2"],
+            "uid": ["user1"],
+            "uidNumber": ["124"],
+            "gidNumber": ["457"],
+            "homeDirectory": ["/home/user1"],
+            "loginShell": ["/bin/bash"],
+            "userPassword": ["the password"],
+            "objectclass": ["posixAccount", "top"]
+        }
+    ],
+    [
+        "uid=fred,ou=mydept,o=myorg,c=country",
+        {
+            "cn": ["Fred Flintstone"],
+            "uid": ["fred"],
+            "uidNumber": ["125"],
+            "gidNumber": ["458"],
+            "homeDirectory": ["/home/fred"],
+            "loginShell": ["/bin/bash"],
+            "userPassword": ["the fredpassword"],
+            "objectclass": ["posixAccount", "top"]
+        }
+    ],
+    [
+        "uid=barney,ou=mydept,o=myorg,c=country",
+        {
+            "cn": ["Barney Rubble"],
+            "uid": ["barney"],
+            "uidNumber": ["126"],
+            "gidNumber": ["459"],
+            "homeDirectory": ["/home/barney"],
+            "loginShell": ["/bin/zsh"],
+            "userPassword": ["the barneypassword"],
+            "objectclass": ["posixAccount", "top"]
+        }
+    ],
+    [
+        "uid=wilma,ou=mydept,o=myorg,c=country",
+        {
+            "cn": ["Wilma Flintstone"],
+            "uid": ["wilma"],
+            "uidNumber": ["127"],
+            "gidNumber": ["459"],
+            "homeDirectory": ["/home/wilma"],
+            "loginShell": ["/bin/bash"],
+            "userPassword": ["the wilmapassword"],
+            "objectclass": ["posixAccount", "top"]
+        }
+    ],
+    [
+        "uid=betty,ou=mydept,o=myorg,c=country",
+        {
+            "cn": ["Betty Rubble"],
+            "uid": ["betty"],
+            "uidNumber": ["128"],
+            "gidNumber": ["460"],
+            "homeDirectory": ["/home/betty"],
+            "loginShell": ["/bin/bash"],
+            "userPassword": ["the bettypassword"],
+            "objectclass": ["posixAccount", "top"]
+        }
+    ],
+    [
+        "uid=bambam,ou=children,ou=mydept,o=myorg,c=country",
+        {
+            "cn": ["BamBam Rubble"],
+            "uid": ["bambam"],
+            "uidNumber": ["129"],
+            "gidNumber": ["461"],
+            "homeDirectory": ["/home/bambam"],
+            "loginShell": ["/bin/tcsh"],
+            "userPassword": ["the bambampassword"],
+            "objectclass": ["posixAccount", "top"]
+        }
+    ],
+    [
+        "uid=pebbles,ou=children,ou=mydept,o=myorg,c=country",
+        {
+            "cn": ["Pebbles Flintstone"],
+            "uid": ["pebbles"],
+            "uidNumber": ["130"],
+            "gidNumber": ["462"],
+            "homeDirectory": ["/home/pebbles"],
+            "loginShell": ["/bin/tcsh"],
+            "userPassword": ["the pebblespassword"],
+            "objectclass": ["posixAccount", "top"]
+        }
+    ]
+]

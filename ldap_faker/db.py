@@ -350,8 +350,19 @@ class OptionStore:
         Returns:
             The value for the option, or the default.
         """
-        if option not in self.options:
-            return ldap.get_option(option)
+        if option not in ldap.OPT_NAMES_DICT:
+            raise ValueError(f'unknown option {option}')
+        if option in (ldap.OPT_API_INFO, ldap.OPT_SUCCESS):
+            # Even though we declare the output as "int | str", openldap at least returns
+            # a dict for this
+            return {  # type: ignore
+                'info_version': 1,
+                'api_version': 3001,
+                'vendor_name': 'python-ldap-faker',
+                'vendor_version': '1.0.0'
+            }
+        if option == ldap.OPT_PROTOCOL_VERSION:
+            return 3
         return self.options[option]
 
 
@@ -615,18 +626,22 @@ class ObjectStore:
     def count(self):
         return len(self.objects)
 
-    def exists(self, dn: str) -> bool:
+    def exists(self, dn: str, validate: bool = True) -> bool:
         """
         Test whether an object with dn ``dn`` exists.
 
         Args:
             dn: the dn of the object to look for
 
+        Keyword Args:
+            validate: if ``True``, validate that ``dn`` is a valid dn
+
         Returns:
             ``True`` if the object exists, ``False`` otherwise.
 
         """
-        self.__validate_dn(dn, ldap.RES_SEARCH_ENTRY)
+        if validate:
+            self.__validate_dn(dn, ldap.RES_SEARCH_ENTRY)
         return dn in self.objects
 
     def get(self, dn: str) -> LDAPData:
@@ -856,7 +871,7 @@ class ObjectStore:
         """
         Return just the attributes on ``obj`` named in ``attrlist``.   If
         ``attrlist`` is ``None`` or "``*``"  is in ``attrlist``, return all
-    attributes on ``obj``.
+        attributes on ``obj``.
 
         Note:
             We're doing a pretty simplistic implementation of this here, and we
@@ -867,7 +882,8 @@ class ObjectStore:
             obj: the data for an LDAP object
 
         Keyword Args:
-            attrlist: a list of attributes to include on ``obj``, removing attributes not named
+            attrlist: a list of attributes to include on ``obj``, removing
+                attributes not named
 
         Returns:
             A filtered set version of obj with only the attributes named in ``attrlist``.
@@ -883,7 +899,7 @@ class ObjectStore:
         attrlist: List[str] = None,
     ) -> LDAPSearchResult:
         """
-        Do a ``ldap.SCOPE_BASE`` search.  Return the requested attributes of the
+        Do a :py:data:`ldap.SCOPE_BASE` search.  Return the requested attributes of the
         object in our object store with ``dn`` of ``base`` that also matches
         ``filterstr``.
 
@@ -910,9 +926,10 @@ class ObjectStore:
         if not self.__is_default_filter(filterstr):
             filt = self.__parse_filterstr(filterstr)
             if filt.match(ci_data):
-                # We need to do the filter against the the case-insensitive versions of our
-                # attribute names, because that's how LDAP works.  Filter.match() will take
-                # care of doing case-insensitive value comparisons
+                # We need to do the filter against the the case-insensitive
+                # versions of our attribute names, because that's how LDAP
+                # works.  Filter.match() will take care of doing
+                # case-insensitive value comparisons
                 results.append((base, self._filter_attributes(data, attrlist)))
         else:
             results.append((base, self._filter_attributes(data, attrlist)))
@@ -925,8 +942,8 @@ class ObjectStore:
         attrlist: List[str] = None,
     ) -> LDAPSearchResult:
         """
-        Do an ``ldap.SCOPE_ONELEVEL`` search, for objects directly under basedn
-        ``base`` that match ``filterstr``.
+        Do a :py:data:`ldap.SCOPE_ONELEVEL` search, for objects directly under
+        basedn ``base`` that match ``filterstr``.
 
         Args:
             base: the dn of the object to return
@@ -940,7 +957,7 @@ class ObjectStore:
             ldap.FILTER_ERROR: ``filterstr`` is has bad filter syntax
 
         Returns:
-            A list of LDAP objects -- 2-tuples of (dn, data).
+            A list of LDAP objects -- 2-tuples of ``(dn, data)``.
         """
         self.__validate_dn(base, ldap.RES_SEARCH_RESULT)
         basedn_parts = ldap.dn.explode_dn(base.lower(), flags=ldap.DN_FORMAT_LDAPV3)
@@ -966,8 +983,8 @@ class ObjectStore:
         attrlist: List[str] = None
     ) -> LDAPSearchResult:
         """
-        Do an ``ldap.SCOPE_SUBTREE`` search, for objects under basedn ``base`` that
-        match ``filterstr``.
+        Do a :py:data:`ldap.SCOPE_SUBTREE` search, for objects under basedn
+        ``base`` that match ``filterstr``.
 
         Args:
             base: the dn of the object to return
@@ -981,7 +998,7 @@ class ObjectStore:
             ldap.FILTER_ERROR: ``filterstr`` is has bad filter syntax
 
         Returns:
-            A list of LDAP objects -- 2-tuples of (dn, data).
+            A list of LDAP objects -- 2-tuples of ``(dn, data)``.
         """
         self.__validate_dn(base, ldap.RES_SEARCH_RESULT)
         basedn_parts = ldap.dn.explode_dn(base.lower(), flags=ldap.DN_FORMAT_LDAPV3)

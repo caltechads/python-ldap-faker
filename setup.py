@@ -14,10 +14,6 @@ setup(
         'case-insensitive-dictionary',
         'ldap-filter'
     ],
-    tests_require=[
-        'coverage',
-        'python-ldap',
-    ],
     author="Caltech IMSS ADS",
     author_email="cmalek@caltech.edu",
     url="https://github.com/caltechads/python-ldap-faker",

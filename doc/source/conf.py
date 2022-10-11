@@ -15,7 +15,7 @@
 # sys.path.insert(0, os.path.abspath('.'))
 
 from typing import List, Dict, Tuple, Optional
-import sphinx_rtd_theme
+import sphinx_rtd_theme  # pylint: disable=unused-import  # noqa:F401
 
 # -- Project information -----------------------------------------------------
 

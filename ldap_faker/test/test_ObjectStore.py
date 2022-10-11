@@ -326,6 +326,13 @@ class TestObjectStore_update(RegisterObjectsMixin, unittest.TestCase):
         data = self.store.get(dn)
         self.assertEqual(data['newattr'], [b'new value'])
 
+    def test__updates_objects_AND_raw_objects(self):
+        modlist = [(ldap.MOD_ADD, 'newattr', [b'new value'])]
+        dn = self.data[0][0]
+        self.store.update(dn, modlist)
+        self.assertEqual(self.store.objects[dn]['newattr'], ['new value'])
+        self.assertEqual(self.store.raw_objects[dn]['newattr'], [b'new value'])
+
     def test_can_add_values_to_existing_attribute(self):
         modlist = [
             (ldap.MOD_ADD, 'objectclass', [b'eduPerson'])
@@ -408,12 +415,21 @@ class TestObjectStore_update(RegisterObjectsMixin, unittest.TestCase):
         data = self.store.get(dn)
         self.assertEqual(data['objectclass'], [b'top', b'eduPerson'])
         self.assertEqual(data['newattr'], [b'new value'])
-        self.assertEqual(data['gidNumber'], [b'456'])
+        self.assertEqual(data['uidNumber'], [b'456'])
+
+    def test_invalid_operation_raises_PROTOCOL_ERROR(self):
+        modlist = [
+            (100, 'objectclass', [b'posixaccount']),
+        ]
+        with self.assertRaises(ldap.PROTOCOL_ERROR):
+            dn = self.data[0][0]
+            self.store.update(dn, modlist)
 
 
 class TestObjectStore_create(RegisterObjectsMixin, unittest.TestCase):
 
     def setUp(self):
+        super().setUp()
         self.dn = 'uid=myuser,ou=bar,o=baz,c=country'
         self.modlist = [
             ('uid', [b'myuser']),
@@ -432,11 +448,179 @@ class TestObjectStore_create(RegisterObjectsMixin, unittest.TestCase):
         for entry in self.modlist:
             self.assertEqual(data[entry[0]], entry[1])
 
+    def test_create_updates_objects_AND_raw_objects(self):
+        self.store.create(self.dn, self.modlist)
+        self.assertTrue(self.dn in self.store.objects)
+        self.assertTrue(self.dn in self.store.raw_objects)
+
+    def test_adding_object_with_existing_dn_raises_ALREADY_EXISTS(self):
+        with self.assertRaises(ldap.ALREADY_EXISTS):
+            self.store.create(self.data[0][0], self.modlist)
+
     def test_invalid_dn_raises_INVALID_DN_SYNTAX(self):
         with self.assertRaises(ldap.INVALID_DN_SYNTAX):
             self.store.create('uid=foo,,ou=bar,o=baz,c=country', self.modlist)
 
     def test_invalid_value_raises_TypeError(self):
-        self.modlist.append('gecos', 'foobar')
+        self.modlist.append(('gecos', 'foobar'))
         with self.assertRaises(TypeError):
-            self.store.create('uid=foo,,ou=bar,o=baz,c=country', self.modlist)
+            self.store.create('uid=foo,ou=bar,o=baz,c=country', self.modlist)
+
+
+class TestObjectStore_search_base(unittest.TestCase):
+
+    def setUp(self):
+        self.filename = Path(__file__).parent / Path('big.json')
+        self.store = ObjectStore()
+        self.store.load_objects(self.filename)
+
+    def test_returns_one_object_if_object_exists(self):
+        results = self.store.search_base('uid=fred,ou=mydept,o=myorg,c=country', '(objectclass=*)')
+        self.assertEqual(len(results), 1)
+
+    def test_returns_expected_object_if_object_exists(self):
+        results = self.store.search_base('uid=fred,ou=mydept,o=myorg,c=country', '(objectclass=*)')
+        self.assertEqual(results[0][0], 'uid=fred,ou=mydept,o=myorg,c=country')
+        self.assertEqual(results[0][1]['cn'], [b'Fred Flintstone'])
+
+    def test_filtering_works_on_matched_objects(self):
+        results = self.store.search_base('uid=fred,ou=mydept,o=myorg,c=country', '(uid=blah)')
+        self.assertEqual(len(results), 0)
+
+    def test_attrlist_works_on_matched_objects(self):
+        results = self.store.search_base(
+            'uid=fred,ou=mydept,o=myorg,c=country',
+            '(objectclass=*)',
+            attrlist=['uid', 'cn']
+        )
+        self.assertEqual(len(results), 1)
+        data = results[0]
+        self.assertEqual(list(data[1].keys()), ['cn', 'uid'])
+
+    def test_raises_NO_SUCH_OBJECT_if_object_does_not_exist(self):
+        with self.assertRaises(ldap.NO_SUCH_OBJECT):
+            self.store.search_base('uid=snoopy,ou=mydept,o=myorg,c=country', '(objectclass=*)')
+
+
+class TestObjectStore_search_onelevel(unittest.TestCase):
+
+    def setUp(self):
+        self.filename = Path(__file__).parent / Path('big.json')
+        self.store = ObjectStore()
+        self.store.load_objects(self.filename)
+
+    def test_returns_objects_only_at_the_desired_level(self):
+        results = self.store.search_onelevel('ou=mydept,o=myorg,c=country', '(objectclass=*)')
+        self.assertEqual(len(results), 6)
+        results = self.store.search_onelevel('o=myorg,c=country', '(objectclass=*)')
+        self.assertEqual(len(results), 0)
+        results = self.store.search_onelevel('ou=children,ou=mydept,o=myorg,c=country', '(objectclass=*)')
+        self.assertEqual(len(results), 2)
+
+    def test_filtering_works_on_matched_objects(self):
+        results = self.store.search_onelevel('ou=mydept,o=myorg,c=country', '(loginshell=/bin/bash)')
+        self.assertEqual(len(results), 5)
+        results = self.store.search_onelevel('ou=mydept,o=myorg,c=country', '(cn=*flintstone)')
+        self.assertEqual(len(results), 2)
+
+    def test_filtering_is_case_insensitive(self):
+        results = self.store.search_onelevel('ou=mydept,o=myorg,c=country', '(CN=*flintstone)')
+        self.assertEqual(len(results), 2)
+        results = self.store.search_onelevel('ou=mydept,o=myorg,c=country', '(Cn=*fliNTstone)')
+        self.assertEqual(len(results), 2)
+
+    def test_attrlist_works_on_matched_objects(self):
+        results = self.store.search_onelevel(
+            'ou=mydept,o=myorg,c=country',
+            '(objectclass=*)',
+            attrlist=['uid', 'cn']
+        )
+        data = results[0]
+        self.assertEqual(list(data[1].keys()), ['cn', 'uid'])
+
+
+class TestObjectStore_search_subtree(unittest.TestCase):
+
+    def setUp(self):
+        self.filename = Path(__file__).parent / Path('big.json')
+        self.store = ObjectStore()
+        self.store.load_objects(self.filename)
+
+    def test_returns_objects_all_subtrees(self):
+        results = self.store.search_subtree('ou=mydept,o=myorg,c=country', '(objectclass=*)')
+        self.assertEqual(len(results), 8)
+        results = self.store.search_subtree('o=myorg,c=country', '(objectclass=*)')
+        self.assertEqual(len(results), 8)
+        results = self.store.search_subtree('ou=children,ou=mydept,o=myorg,c=country', '(objectclass=*)')
+        self.assertEqual(len(results), 2)
+
+    def test_filtering_works_on_matched_objects(self):
+        results = self.store.search_subtree('ou=mydept,o=myorg,c=country', '(loginshell=/bin/tcsh)')
+        self.assertEqual(len(results), 2)
+        results = self.store.search_subtree('ou=mydept,o=myorg,c=country', '(cn=*flintstone)')
+        self.assertEqual(len(results), 3)
+
+    def test_filtering_is_case_insensitive(self):
+        results = self.store.search_subtree('ou=mydept,o=myorg,c=country', '(CN=*flintstone)')
+        self.assertEqual(len(results), 3)
+        results = self.store.search_subtree('ou=mydept,o=myorg,c=country', '(Cn=*fliNTstone)')
+        self.assertEqual(len(results), 3)
+
+    def test_attrlist_works_on_matched_objects(self):
+        results = self.store.search_subtree(
+            'ou=mydept,o=myorg,c=country',
+            '(objectclass=*)',
+            attrlist=['uid', 'cn']
+        )
+        data = results[0]
+        self.assertEqual(list(data[1].keys()), ['cn', 'uid'])
+
+
+class TestObjectStore_search_filtering(unittest.TestCase):
+
+    def setUp(self):
+        self.filename = Path(__file__).parent / Path('big.json')
+        self.store = ObjectStore()
+        self.store.load_objects(self.filename)
+
+    def test_or_works(self):
+        results = self.store.search_subtree('ou=mydept,o=myorg,c=country', '(|(cn=*flintstone)(cn=*rubble))')
+        self.assertEqual(len(results), 6)
+
+    def test_and_works(self):
+        results = self.store.search_subtree('ou=mydept,o=myorg,c=country', '(&(cn=*flintstone)(cn=fred*))')
+        self.assertEqual(len(results), 1)
+
+    def test_lte_works(self):
+        results = self.store.search_subtree('ou=mydept,o=myorg,c=country', '(uidnumber<=126)')
+        self.assertEqual(len(results), 4)
+
+    def test_gte_works(self):
+        results = self.store.search_subtree('ou=mydept,o=myorg,c=country', '(uidnumber>=128)')
+        self.assertEqual(len(results), 3)
+
+    def test_filtering_is_case_insensitive(self):
+        results = self.store.search_subtree('ou=mydept,o=myorg,c=country', '(CN=*flintstone)')
+        self.assertEqual(len(results), 3)
+        results = self.store.search_subtree('ou=mydept,o=myorg,c=country', '(Cn=*fliNTstone)')
+        self.assertEqual(len(results), 3)
+
+
+class TestObjectStore_delete(RegisterObjectsMixin, unittest.TestCase):
+
+    def test_can_delete_existing_object(self):
+        self.store.delete('uid=user,ou=mydept,o=myorg,c=country')
+        self.assertFalse(self.store.exists('uid=user,ou=mydept,o=myorg,c=country'))
+
+    def test_deletes_from_objects_AND_raw_objects(self):
+        self.store.delete('uid=user,ou=mydept,o=myorg,c=country')
+        self.assertTrue('uid=user,ou=mydept,o=myorg,c=country' not in self.store.objects)
+        self.assertTrue('uid=user,ou=mydept,o=myorg,c=country' not in self.store.raw_objects)
+
+    def test_delete_nonexistant_object_raises_NO_SUCH_OBJECT(self):
+        with self.assertRaises(ldap.NO_SUCH_OBJECT):
+            self.store.delete('uid=blah,ou=mydept,o=myorg,c=country')
+
+    def test_invalid_dn_raises_INVALID_DN_SYNTAX(self):
+        with self.assertRaises(ldap.INVALID_DN_SYNTAX):
+            self.store.delete('uid=foo,,ou=bar,o=baz,c=country')

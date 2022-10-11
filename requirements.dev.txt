@@ -4,3 +4,9 @@ autopep8                                      # https://github.com/hhatto/autope
 flake8                                        # https://github.com/PyCQA/flake8
 pycodestyle                                   # https://github.com/PyCQA/pycodestyle
 mypy                                          # https://github.com/python/mypy
+
+# Testing
+# ------------------------------------------------------------------------------
+tox                                           # https://github.com/tox-dev/tox
+nose2>=0.6.5                                  # https://github.com/nose-devs/nose2
+nose2[coverage_plugin]>=0.6.5
