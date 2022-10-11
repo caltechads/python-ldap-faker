@@ -1,4 +1,4 @@
 # Documentation
 # ------------------------------------------------------------------------------
-Sphinx                                        # https://github.com/sphinx-doc/sphinx
-sphinx_rtd_theme
+Sphinx==5.2.3                                 # https://github.com/sphinx-doc/sphinx
+sphinx_rtd_theme==1.0.0
