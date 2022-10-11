@@ -4,7 +4,9 @@ version: 2
 build:
   image: latest
   apt_packages:
-    - libldap2-dev
+    - libldap-common
+    - libldap-dev
+
 
 sphinx:
   configuration: doc/source/conf.py
@@ -16,4 +18,3 @@ python:
   install:
     - method: pip
       path: .
-    - requirements: doc/requirements.txt
