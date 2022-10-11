@@ -5,6 +5,7 @@ build:
   image: latest
   apt_packages:
     - gcc
+    - libsasl2-dev
     - libldap-common
     - libldap-dev
 
