@@ -16,3 +16,6 @@ from .db import (  # noqa:F403,F401
 from .unittest import (  # noqa:F403,F401
     LDAPFakerMixin
 )
+
+# Import our hooks
+import ldap_faker.servers.server_389  # pylint: disable=wrong-import-order  # noqa:F401
