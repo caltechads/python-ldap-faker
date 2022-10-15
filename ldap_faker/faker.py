@@ -120,7 +120,8 @@ class FakeLDAP:
     """
 
     def __init__(self, server_factory: LDAPServerFactory) -> None:
-        self.connections: List["FakeLDAPObject"] = []  #: list of :py:class:`FakeLDAPObject` connections created in the order in which they were requested
+        self.connections: List["FakeLDAPObject"] = \
+            []  #: list of :py:class:`FakeLDAPObject` connections created in the order in which they were requested
         self.calls: CallHistory = CallHistory()  #: The call history for global ldap function calls
         self.options: OptionStore = OptionStore()  #: A dictionary of LDAP options set
         self.stores: Dict[str, ObjectStore] = {}
@@ -309,13 +310,15 @@ class FakeLDAPObject:
             self.store = store
         else:
             self.store = ObjectStore()
+
         # calls is our call history
         self.calls: CallHistory = CallHistory()  #: The method call history
+
         self.tls_enabled: bool = False  #: Set to True if :py:meth:`start_tls_s` was called
         self.bound_dn: Optional[str] = None  #: Set by :py:meth:`simple_bind_s` to the dn of the user after success
 
         # Other standard LDAPObject attributes that test code might look at
-        self.deref: int = ldap.DEREF_NEVER  #: Controls whether aliases are automatically dereferenced (always :py:attr:`ldap.DEREF_NEVER`).
+        self.deref: int = ldap.DEREF_NEVER  #: Controls whether aliases are automatically dereferenced
         self.protocol_version: int = ldap.VERSION3  #: Version of LDAP in use (always :py:attr:`ldap.VERSION3``)
         self.sizelimit: int = ldap.NO_LIMIT  #: Limit on size of message to receive from server
         self.network_timeout: int = ldap.NO_LIMIT  #: Limit on waiting for a network response, in seconds.
@@ -577,7 +580,7 @@ class FakeLDAPObject:
         Returns:
             A :py:func:`ldap.result3` type 4-tuple.
         """
-        self.store.update(dn, modlist)
+        self.store.update(dn, modlist, bind_dn=self.bound_dn)
         return (ldap.RES_MODIFY, [], 3, [])
 
     @needs_bind
@@ -635,7 +638,7 @@ class FakeLDAPObject:
             ldap.ALREADY_EXISTS: an object with dn of ``dn`` already exists in our object store
             ldap.INSUFFICIENT_ACCESS: you need to do a non-anonymous bind before doing this
         """
-        self.store.create(dn, modlist)
+        self.store.create(dn, modlist, bind_dn=self.bound_dn)
 
     @needs_bind
     @record_call
@@ -674,9 +677,9 @@ class FakeLDAPObject:
         newdn = newrdn + ',' + basedn
         attr, value = newrdn.split('=')
         entry[attr] = [value.encode('utf-8')]
-        self.store.set(newdn, entry)
+        self.store.set(newdn, entry, bind_dn=self.bound_dn)
         if delold and dn != newrdn:
-            self.store.delete(dn)
+            self.store.delete(dn, bind_dn=self.bound_dn)
 
     @record_call
     def unbind_s(self) -> None:

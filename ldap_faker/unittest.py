@@ -31,7 +31,8 @@ class LDAPFakerMixin:
     :py:attr:`ldap_fixtures` names one or more JSON
     files containing LDAP records to load into a :py:class:`ObjectStore` via
     :py:meth:`ObjectStore.load_objects`.  :py:attr:`ldap_fixtures`
-    can be either a single string, or a list of ``Tuple[str, str]``.
+    can be either a single string, a ``Tuple[str, List[str]]``, or a list
+    of ``Tuple[str, str, List[str]]``.
 
     If we define our test class like so::
 
@@ -42,27 +43,45 @@ class LDAPFakerMixin:
     We will build our ``LDAPServerFactory`` with a single default
     ``ObjectStore`` with the contents of ``myfixture.json`` loaded in.
 
+    If we define our test class like so::
+
+        class TestMyStuff(LDAPFakerMixin, unittest.TestCase):
+
+            ldap_fixtures = ('myfixture.json', ['389'])
+
+    We will build our ``LDAPServerFactory`` with a single default
+    ``ObjectStore`` with the contents of ``myfixture.json`` loaded in,
+    with the tag `389` applied to it.
+
     If we define our test class like this instead::
 
             class TestMyStuff(LDAPFakerMixin, unittest.TestCase):
 
                 ldap_fixtures = [
-                    ('server1.json', 'ldap://server1'),
-                    ('server2.json', 'ldap://read-server2'),
+                    ('server1.json', 'ldap://server1', []),
+                    ('server2.json', 'ldap://read-server2', ['389']),
                 ]
 
     we will build our :py:class:`LDAPServerFactory` with two
     :py:class:`ObjectStore` objects.  The first will have the data from
-    ``server1.json`` and will be used with uri ``ldap://server1``, and the
+    ``server1.json`` and will be used with uri ``ldap://server1``. The
     second will be used with uri ``ldap://server2`` and have the data from with
-    the contents of ``server2.json`` loaded in.
+    the contents of ``server2.json`` loaded in, and will have the tag ``389``
+    applied to it.
+
+    .. note::
+        The tags are used when configuring behavior for our
+        :py:class:`ObjectStore``.  The ``389`` tag tells the
+        :py:class:`ObjectStore` to emulate a 389 type LDAP server (Redhat
+        Directory Server).
     """
 
     ldap_modules: List[str] = []  #: The list of python paths to modules that import ``ldap``
     ldap_fixtures: Optional[LDAPFixtureList] = None  #: The filenames of fixtures to load into our fake LDAP servers
 
     def __init__(self, *args, **kwargs):
-        self.server_factory: LDAPServerFactory  #: The :py:class:`LDAPServerFactory` configured by our :py:meth:`setUpClass`
+        self.server_factory: LDAPServerFactory  \
+            #: The :py:class:`LDAPServerFactory` configured by our :py:meth:`setUpClass`
         self.fake_ldap: FakeLDAP  #: the :py:class:`FakeLDAP` instance created by :py:meth:`setUp`
         self.check()
         super().__init__(*args, **kwargs)
@@ -130,9 +149,13 @@ class LDAPFakerMixin:
         if cls.ldap_fixtures:
             if isinstance(cls.ldap_fixtures, list):
                 for item in cls.ldap_fixtures:
-                    filename, uri = item
+                    filename, uri, tags = item
                     full_path = cls.resolve_file(filename)
-                    server_factory.load_from_file(full_path, uri)
+                    server_factory.load_from_file(full_path, uri=uri, tags=tags)
+            elif isinstance(cls.ldap_fixtures, tuple):
+                filename, tags = cls.ldap_fixtures
+                full_path = cls.resolve_file(filename)
+                server_factory.load_from_file(full_path, tags=tags)
             else:
                 full_path = cls.resolve_file(cls.ldap_fixtures)
                 server_factory.load_from_file(full_path)

@@ -191,7 +191,11 @@ class TestObjectStore_load_objects(unittest.TestCase):
             self.assertTrue(isinstance(record['cn'][0], str))
 
 
-class TestObjectStore_exists(RegisterObjectsMixin, unittest.TestCase):
+class BaseTestObjectStore_exists:
+    """
+    We're doing this here so that we can use these test methods in server specific
+    tests without running the same test suite multiple times.
+    """
 
     def test_invalid_dn_raises_INVALID_DN_SYNTAX(self):
         with self.assertRaises(ldap.INVALID_DN_SYNTAX):
@@ -204,7 +208,15 @@ class TestObjectStore_exists(RegisterObjectsMixin, unittest.TestCase):
         self.assertFalse(self.store.exists("uid=not-here,ou=bar,o=baz,c=country"))
 
 
-class TestObjectStore_get(RegisterObjectsMixin, unittest.TestCase):
+class TestObjectStore_exists(RegisterObjectsMixin, BaseTestObjectStore_exists, unittest.TestCase):
+    pass
+
+
+class BaseTestObjectStore_get:
+    """
+    We're doing this here so that we can use these test methods in server specific
+    tests without running the same test suite multiple times.
+    """
 
     def test_invalid_dn_raises_INVALID_DN_SYNTAX(self):
         with self.assertRaises(ldap.INVALID_DN_SYNTAX):
@@ -231,7 +243,15 @@ class TestObjectStore_get(RegisterObjectsMixin, unittest.TestCase):
         )
 
 
-class TestObjectStore_copy(RegisterObjectsMixin, unittest.TestCase):
+class TestObjectStore_get(RegisterObjectsMixin, BaseTestObjectStore_get, unittest.TestCase):
+    pass
+
+
+class BaseTestObjectStore_copy:
+    """
+    We're doing this here so that we can use these test methods in server specific
+    tests without running the same test suite multiple times.
+    """
 
     def test_invalid_dn_raises_INVALID_DN_SYNTAX(self):
         with self.assertRaises(ldap.INVALID_DN_SYNTAX):
@@ -248,23 +268,15 @@ class TestObjectStore_copy(RegisterObjectsMixin, unittest.TestCase):
             self.store.copy('uid=fred,ou=mydept,o=myorg,c=country')
 
 
-class TestObjectStore_set(RegisterObjectsMixin, unittest.TestCase):
+class TestObjectStore_copy(RegisterObjectsMixin, BaseTestObjectStore_copy, unittest.TestCase):
+    pass
 
-    def setUp(self):
-        self.obj = (
-            'uid=user3,ou=mydept,o=myorg,c=country',
-            {
-                'cn': [b'Firstname User3'],
-                'uid': [b'user3'],
-                'uidNumber': [b'126'],
-                'gidNumber': [b'458'],
-                'homeDirectory': [b'/home/user3'],
-                'loginShell': [b'/bin/bash'],
-                'userPassword': [b'the user3 password'],
-                'objectclass': [b'posixAccount', b'top']
-            }
-        )
-        super().setUp()
+
+class BaseTestObjectStore_set:
+    """
+    We're doing this here so that we can use these test methods in server specific
+    tests without running the same test suite multiple times.
+    """
 
     def test_adds_new_record(self):
         self.assertEqual(self.store.count, 2)
@@ -311,7 +323,26 @@ class TestObjectStore_set(RegisterObjectsMixin, unittest.TestCase):
         self.assertTrue(isinstance(self.store.objects[self.obj[0]]['cn'][0], str))
 
 
-class TestObjectStore_update(RegisterObjectsMixin, unittest.TestCase):
+class TestObjectStore_set(RegisterObjectsMixin, BaseTestObjectStore_set, unittest.TestCase):
+
+    def setUp(self):
+        self.obj = (
+            'uid=user3,ou=mydept,o=myorg,c=country',
+            {
+                'cn': [b'Firstname User3'],
+                'uid': [b'user3'],
+                'uidNumber': [b'126'],
+                'gidNumber': [b'458'],
+                'homeDirectory': [b'/home/user3'],
+                'loginShell': [b'/bin/bash'],
+                'userPassword': [b'the user3 password'],
+                'objectclass': [b'posixAccount', b'top']
+            }
+        )
+        super().setUp()
+
+
+class BaseTestObjectStore_update:
 
     def test_invalid_dn_raises_INVALID_DN_SYNTAX(self):
         with self.assertRaises(ldap.INVALID_DN_SYNTAX):
@@ -426,21 +457,11 @@ class TestObjectStore_update(RegisterObjectsMixin, unittest.TestCase):
             self.store.update(dn, modlist)
 
 
-class TestObjectStore_create(RegisterObjectsMixin, unittest.TestCase):
+class TestObjectStore_update(RegisterObjectsMixin, BaseTestObjectStore_update, unittest.TestCase):
+    pass
 
-    def setUp(self):
-        super().setUp()
-        self.dn = 'uid=myuser,ou=bar,o=baz,c=country'
-        self.modlist = [
-            ('uid', [b'myuser']),
-            ('gidNumber', [b'1000']),
-            ('uidNumber', [b'1000']),
-            ('loginShell', [b'/bin/bash']),
-            ('homeDirectory', [b'/home/myuser']),
-            ('userPassword', [b'the password']),
-            ('cn', [b'My Name']),
-            ('objectClass', [b'top', b'posixAccount']),
-        ]
+
+class BaseTestObjectStore_create:
 
     def test_can_add_new_object(self):
         self.store.create(self.dn, self.modlist)
@@ -465,6 +486,23 @@ class TestObjectStore_create(RegisterObjectsMixin, unittest.TestCase):
         self.modlist.append(('gecos', 'foobar'))
         with self.assertRaises(TypeError):
             self.store.create('uid=foo,ou=bar,o=baz,c=country', self.modlist)
+
+
+class TestObjectStore_create(RegisterObjectsMixin, BaseTestObjectStore_create, unittest.TestCase):
+
+    def setUp(self):
+        super().setUp()
+        self.dn = 'uid=myuser,ou=bar,o=baz,c=country'
+        self.modlist = [
+            ('uid', [b'myuser']),
+            ('gidNumber', [b'1000']),
+            ('uidNumber', [b'1000']),
+            ('loginShell', [b'/bin/bash']),
+            ('homeDirectory', [b'/home/myuser']),
+            ('userPassword', [b'the password']),
+            ('cn', [b'My Name']),
+            ('objectClass', [b'top', b'posixAccount']),
+        ]
 
 
 class TestObjectStore_search_base(unittest.TestCase):
@@ -546,6 +584,10 @@ class TestObjectStore_search_subtree(unittest.TestCase):
         self.store = ObjectStore()
         self.store.load_objects(self.filename)
 
+    def test_returns_objects_all_objects_if_basedn_is_emptystr(self):
+        results = self.store.search_subtree('', '(objectclass=*)')
+        self.assertEqual(len(results), 8)
+
     def test_returns_objects_all_subtrees(self):
         results = self.store.search_subtree('ou=mydept,o=myorg,c=country', '(objectclass=*)')
         self.assertEqual(len(results), 8)
@@ -574,6 +616,41 @@ class TestObjectStore_search_subtree(unittest.TestCase):
         )
         data = results[0]
         self.assertEqual(list(data[1].keys()), ['cn', 'uid'])
+
+    def test_operational_attributes_are_excluded(self):
+        self.store.operational_attributes.add('loginShell')
+        self.store.operational_attributes.add('userPassword')
+        results = self.store.search_subtree(
+            'ou=mydept,o=myorg,c=country',
+            '(objectclass=*)',
+        )
+        data = results[0]
+        self.assertNotIn('loginShell', data[1])
+        self.assertNotIn('userPassword', data[1])
+
+    def test_operational_attributes_are_included_if_in_attrlist(self):
+        self.store.operational_attributes.add('loginShell')
+        self.store.operational_attributes.add('userPassword')
+        results = self.store.search_subtree(
+            'ou=mydept,o=myorg,c=country',
+            '(objectclass=*)',
+            attrlist=["*", "loginShell"]
+        )
+        data = results[0]
+        self.assertIn('loginShell', data[1])
+        self.assertNotIn('userPassword', data[1])
+
+    def test_include_operational_attributes_works(self):
+        self.store.operational_attributes.add('loginShell')
+        self.store.operational_attributes.add('userPassword')
+        results = self.store.search_subtree(
+            'ou=mydept,o=myorg,c=country',
+            '(objectclass=*)',
+            include_operational_attributes=True
+        )
+        data = results[0]
+        self.assertIn('loginShell', data[1])
+        self.assertIn('userPassword', data[1])
 
 
 class TestObjectStore_search_filtering(unittest.TestCase):
@@ -604,6 +681,65 @@ class TestObjectStore_search_filtering(unittest.TestCase):
         self.assertEqual(len(results), 3)
         results = self.store.search_subtree('ou=mydept,o=myorg,c=country', '(Cn=*fliNTstone)')
         self.assertEqual(len(results), 3)
+
+
+class TestObjectStore_search_attrlist(unittest.TestCase):
+
+    def setUp(self):
+        self.filename = Path(__file__).parent / Path('big.json')
+        self.store = ObjectStore()
+        self.store.load_objects(self.filename)
+
+    def test_attrlist_gives_requested_attrs_only(self):
+        tests = [
+            ['uid'],
+            ['uid', 'cn'],
+            ['uid', 'cn', 'loginShell']
+        ]
+        for t in tests:
+            results = self.store.search_subtree('ou=mydept,o=myorg,c=country', '(uid=fred)', attrlist=t)
+            self.assertEqual(len(results), 1)
+            self.assertEqual(sorted(list(results[0][1].keys())), sorted(t))
+
+    def test_attrlist_is_case_insensitive(self):
+        """
+        * the attrlist itself is case insensitive
+        * the names of the attrs returned are in the same case as that requested
+        """
+        tests = [
+            ['loginshell'],
+            ['loginshell', 'gidnumber']
+        ]
+        for t in tests:
+            results = self.store.search_subtree('ou=mydept,o=myorg,c=country', '(uid=fred)', attrlist=t)
+            self.assertEqual(len(results), 1)
+            self.assertEqual(sorted(list(results[0][1].keys())), sorted(t))
+
+    def test_operational_attributes_are_omitted(self):
+        """
+        * the attrlist itself is case insensitive
+        * the names of the attrs returned are in the same case as that requested
+        """
+        self.store.operational_attributes.add('userPassword')
+        results = self.store.search_subtree('ou=mydept,o=myorg,c=country', '(uid=fred)')
+        self.assertEqual(len(results), 1)
+        self.assertNotIn('userPassword', results[0][1])
+
+    def test_operational_attributes_can_be_requested(self):
+        """
+        * the attrlist itself is case insensitive
+        * the names of the attrs returned are in the same case as that requested
+        """
+        self.store.operational_attributes.add('userPassword')
+        results = self.store.search_subtree('ou=mydept,o=myorg,c=country', '(uid=fred)', attrlist=['userpassword'])
+        self.assertEqual(len(results), 1)
+        self.assertEqual(sorted(list(results[0][1].keys())), ['userpassword'])
+
+    def test_operational_attributes_can_be_requested_with_all_attrs(self):
+        self.store.operational_attributes.add('userPassword')
+        results = self.store.search_subtree('ou=mydept,o=myorg,c=country', '(uid=fred)', attrlist=['*', 'userpassword'])
+        self.assertEqual(len(results), 1)
+        self.assertEqual(len(list(results[0][1].keys())), 8)
 
 
 class TestObjectStore_delete(RegisterObjectsMixin, unittest.TestCase):

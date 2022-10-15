@@ -11,16 +11,18 @@ import ldap
 from ldap_filter import Filter
 from ldap_filter.parser import ParseError
 
+from .hooks import hooks
 from .types import (
     AddModList,
-    LDAPObjectStore,
+    Attrlist,
     CILDAPData,
-    LDAPSearchResult,
+    LDAPData,
+    LDAPObjectStore,
     LDAPOptionStore,
     LDAPOptionValue,
-    LDAPData,
-    RawLDAPObjectStore,
     LDAPRecord,
+    LDAPSearchResult,
+    RawLDAPObjectStore,
     ModList
 )
 
@@ -118,7 +120,7 @@ class LDAPServerFactory:
         self.servers: Dict[str, "ObjectStore"] = {}
         self.default: Optional["ObjectStore"] = None
 
-    def load_from_file(self, filename: str, uri: str = None) -> None:
+    def load_from_file(self, filename: str, uri: str = None, tags: List[str] = None) -> None:
         """
         Given a file path to a JSON file with the objects for an :py:class:`ObjectStore`,
         create a new :py:class:`ObjectStore`, load it with that JSON File and register it
@@ -129,6 +131,7 @@ class LDAPServerFactory:
 
         Keyword Args:
             uri: the uri to assign to the :py:class:`ObjectStore` we create
+            tags: the list of tags to apply to the the :py:class:`ObjectStore`
 
         Raises:
             ValueError: raised if a default is already configured while trying to
@@ -136,7 +139,9 @@ class LDAPServerFactory:
             RuntimeWarning: raised if we try to overwrite an already registered object
                 store with our new one
         """
-        store = ObjectStore()
+        if not tags:
+            tags = []
+        store = ObjectStore(tags=tags)
         store.load_objects(filename)
         self.register(store, uri=uri)
 
@@ -375,21 +380,31 @@ class ObjectStore:
     _QUERY_RE = re.compile(r"\(\w+=.+\)$")
     _DEFAULT_SEARCH_RE = re.compile(r"^\(objectclass=*\)$", re.I)
 
-    def __init__(self):
+    def __init__(self, tags: List[str] = None):
         # raw_objects preserves the object attribute case as it was given to us
         # by register_object, and retains the values as List[bytes]
-        self.raw_objects: RawLDAPObjectStore = RawLDAPObjectStore()  #: LDAP records as they would have been returned by ``python-ldap```
+        self.raw_objects: RawLDAPObjectStore = \
+            RawLDAPObjectStore()  #: LDAP records as they would have been returned by ``python-ldap```
         # objects has the same data as raw_objects, but here we forces the
         # attribute names on each object to be case insensitive, and we convert
         # values to List[str].  We need that because in LDAP searches, attribute
         # names and values are compared as case-insensitive, and Filter.match()
         # expects the filter and values to be strings
         self.objects: LDAPObjectStore = LDAPObjectStore()  #: LDAP records set up to make searching better
+        self.tags: List[str] = tags if tags is not None else []  #: used when filtering hooks to apply
+        self.controls: Dict[str, Any] = {}  #: can be used by hooks to store state
+        self.operational_attributes: Set[str] = set()  #: list of attributes that have to be specifically requested
+        for hook_func in hooks.get('post_objectstore_init', self.tags):
+            hook_func(self)
 
-    def __convert_LDAPData(self, data: LDAPData) -> CILDAPData:
+    def convert_LDAPData(self, data: LDAPData) -> CILDAPData:
         """
         Convert an incoming ``LDAPData` dict (``Dict[str, List[bytes]``])
         to a ``CILDAPData`` dict (``CaseInsensitiveDict[str, List[str]])``)
+
+        We need the data dict to have values as ``List[str]`` so that our
+        filtering works properly -- ``ldap_filter.Filter.match`` only works with
+        strings, not bytes.
 
         Args:
             data: the LDAPData dict to convert
@@ -430,6 +445,8 @@ class ObjectStore:
                 with this dn
             ldap.INVALID_DN_SYNTAX: one of the object DNs is not well formed
         """
+        for hook_func in hooks.get('pre_load_objects', self.tags):
+            hook_func(self, filename)
         with open(filename, 'r', encoding='utf-8') as fd:
             objects = json.load(fd)
         for obj in objects:
@@ -438,6 +455,8 @@ class ObjectStore:
             for attr, value in data.items():
                 new_data[attr] = [entry.encode('utf-8') for entry in value]
             self.register_object((dn, new_data))
+        for hook_func in hooks.get('post_load_objects', self.tags):
+            hook_func(self)
 
     def register_objects(self, objs: List[LDAPRecord]) -> None:
         """
@@ -494,8 +513,12 @@ class ObjectStore:
             ldap.INVALID_DN_SYNTAX: one of the object DNs is not well formed
             TypeError: the LDAPData portion for an object was not of type ``Dict[str, List[bytes]]``
         """
+        for hook_func in hooks.get('pre_register_objects', self.tags):
+            hook_func(self, objs)
         for obj in objs:
             self.register_object(obj)
+        for hook_func in hooks.get('post_register_objects', self.tags):
+            hook_func(self)
 
     def register_object(self, obj: LDAPRecord) -> None:
         """
@@ -537,9 +560,13 @@ class ObjectStore:
             ldap.INVALID_DN_SYNTAX: the DN is not well formed
             TypeError: the LDAPData portion was not of type ``Dict[str, List[bytes]]``
         """
+        for hook_func in hooks.get('pre_register_object', self.tags):
+            hook_func(self, obj)
         if self.exists(obj[0]):
             raise ldap.ALREADY_EXISTS
         self.set(obj[0], obj[1])
+        for hook_func in hooks.get('post_register_object', self.tags):
+            hook_func(self, obj)
 
     # Helpers
 
@@ -620,6 +647,53 @@ class ObjectStore:
             }) from exc
         return filt
 
+    def __filter_attributes(
+        self,
+        obj: LDAPData,
+        attrlist: List[str] = None,
+        include_operational_attributes: bool = False
+    ) -> LDAPData:
+        """
+        Return just the attributes on ``obj`` named in ``attrlist``.   If
+        ``attrlist`` is ``None`` or "``*``"  is in ``attrlist``, return all
+        attributes on ``obj``.
+
+        Any attribute named in :py:attr:`operational_attributes` will be omitted
+        unless specifically named ``attrlist``.
+
+        Note:
+            We return a :py:func:`copy.deepcopy` of the object, not the actual
+            object.  This ensures that if the caller modifies the object they
+            don't update the objects in us unintentionally.
+
+        Args:
+            obj: the data for an LDAP object
+
+        Keyword Args:
+            attrlist: a list of attributes to include on ``obj``, removing
+                attributes not named
+            include_operational_attributes: include all operational attributes
+                even if they weren't requested in ``attrlist``
+
+        Returns:
+            A filtered version of ``obj`` with only the attributes named in
+            ``attrlist``, omitting the operational attributes unless specifically
+            requested.
+        """
+        if not attrlist:
+            attrlist = ['*']
+        obj_attrs = set()
+        if attrlist and '*' in attrlist:
+            obj_attrs = set(obj.keys())
+            if not include_operational_attributes:
+                obj_attrs -= self.operational_attributes
+        if attrlist:
+            obj_attrs.update({attr for attr in attrlist if attr != '*'})
+        _obj_attrs: Attrlist = Attrlist()
+        for attr in obj_attrs:
+            _obj_attrs[attr] = attr
+        return {_obj_attrs[attr]: deepcopy(value) for attr, value in obj.items() if attr in _obj_attrs}
+
     # Main methods
 
     @property
@@ -646,7 +720,7 @@ class ObjectStore:
 
     def get(self, dn: str) -> LDAPData:
         """
-        Return data for an object from our object store.
+        Return all data for an object from our object store.
 
         Args:
             dn: the dn of the object to copy.
@@ -684,11 +758,17 @@ class ObjectStore:
             The data for an LDAP object
         """
         self.__validate_dn(dn, ldap.RES_SEARCH_ENTRY)
-        return deepcopy(self.get(dn))
+        for hook_func in hooks.get('pre_copy', self.tags):
+            hook_func(self, dn)
+        data = deepcopy(self.get(dn))
+        for hook_func in hooks.get('post_copy', self.tags):
+            data = hook_func(self, data)
+        return data
 
-    def set(self, dn: str, data: LDAPData) -> None:
+    def _set(self, dn: str, data: LDAPData) -> None:
         """
-        Add or update data for the object with dn ``dn``.
+        Add or update data for the object with dn ``dn``.  This differs
+        from :py:meth:`set` in that no hooks will be applied.
 
         Args:
             dn: the dn of the object to copy.
@@ -700,9 +780,33 @@ class ObjectStore:
         """
         self.__validate_LDAPRecord((dn, data))
         self.raw_objects[dn] = data
-        self.objects[dn] = self.__convert_LDAPData(data)
+        self.objects[dn] = self.convert_LDAPData(data)
 
-    def update(self, dn: str,  modlist: ModList) -> None:
+    def set(self, dn: str, data: LDAPData, bind_dn: str = None) -> None:
+        """
+        Add or update data for the object with dn ``dn``.
+
+        Args:
+            dn: the dn of the object to copy.
+            data: the dict of data for this object
+
+        Keyword Args:
+            bind_dn: the dn of the user doing the set, if any
+
+        Raises:
+            ldap.INVALID_DN_SYNTAX: the DN is not well formed
+            TypeError: the LDAPData portion was not of type ``Dict[str, List[bytes]]``
+        """
+        self.__validate_LDAPRecord((dn, data))
+        for hook_func in hooks.get('pre_set', self.tags):
+            hook_func(self, (dn, data), bind_dn)
+        self._set(dn, data)
+        self.raw_objects[dn] = data
+        self.objects[dn] = self.convert_LDAPData(data)
+        for hook_func in hooks.get('post_set', self.tags):
+            hook_func(self, (dn, data), bind_dn)
+
+    def update(self, dn: str,  modlist: ModList, bind_dn: str = None) -> None:
         """
         Modify the object with dn of ``dn`` using the modlist ``modlist``.
 
@@ -736,6 +840,9 @@ class ObjectStore:
             dn: the dn of the object to delete
             modlist: a modlist suitable for ``modify_s``
 
+        Keyword Args:
+            bind_dn: the dn of the user doing the update, if any
+
         Raises:
             ldap.INVALID_DN_SYNTAX: the dn was not well-formed
             ldap.NO_SUCH_OBJECT: no object with dn of ``dn`` exists in our
@@ -763,7 +870,16 @@ class ObjectStore:
             return current.intersection(updates)
 
         self.__validate_dn(dn, ldap.RES_MODIFY)
-        obj = self.get(dn)
+        for hook_func in hooks.get('pre_update', self.tags):
+            hook_func(self, dn, modlist, bind_dn)
+        # We want to use a deepcopy of our data here so we don't act directly
+        # on the data in the store before we do our self.set() (because hooks)
+        # may need to look at what the object used to look like in a "pre_set"
+        # hook.
+
+        # We can't use self.copy(dn) here, because hooks may muck with the data
+        # returned, thus this:
+        obj = deepcopy(self.get(dn))
         for item in modlist:
             op, key, value = item
             if op not in (ldap.MOD_ADD, ldap.MOD_DELETE, ldap.MOD_REPLACE):
@@ -804,9 +920,11 @@ class ObjectStore:
             elif op == ldap.MOD_REPLACE:
                 self.__check_bytes(value)
                 obj[key] = value
-        self.set(dn, obj)
+        self.set(dn, obj, bind_dn=bind_dn)
+        for hook_func in hooks.get('post_update', self.tags):
+            hook_func(self, obj, bind_dn)
 
-    def create(self, dn: str, modlist: AddModList) -> None:
+    def create(self, dn: str, modlist: AddModList, bind_dn: str = None) -> None:
         """
         Create an object in our store with dn of ``dn``.
 
@@ -833,12 +951,17 @@ class ObjectStore:
             dn: the dn of the object to add
             modlist: the add modlist
 
+        Keyword Args:
+            bind_dn: the dn of the user doing the create, if any
+
         Raises:
             ldap.INVALID_DN_SYNTAX: the dn was not well-formed
             ldap.ALREADY_EXISTS: an object with dn of ``dn`` already exists in our object store
             ldap.INSUFFICIENT_ACCESS: you need to do a non-anonymous bind before doing this
         """
         self.__validate_dn(dn, ldap.RES_ADD)
+        for hook_func in hooks.get('pre_create', self.tags):
+            hook_func(self, dn, modlist, bind_dn)
         if self.exists(dn):
             raise ldap.ALREADY_EXISTS({'info': '', 'desc': 'Object already exists'})
         entry = {}
@@ -848,49 +971,39 @@ class ObjectStore:
                 raise TypeError(f'Tuple_to_LDAPMod() argument 1 must be str, not {type(attr)}')
             self.__check_bytes(value)
             entry[attr] = value
-        self.set(dn, entry)
+        self.set(dn, entry, bind_dn=bind_dn)
+        for hook_func in hooks.get('post_create', self.tags):
+            hook_func(self, (dn, entry), bind_dn)
 
-    def delete(self, dn: str) -> None:
+    def delete(self, dn: str, bind_dn: str = None) -> None:
         """
         Delete an object from our objects directory.
 
         Args:
             dn: the dn of the object to delete
 
+        Keyword Args:
+            bind_dn: the dn of the user doing the delete, if any
+
         Raises:
             ldap.INVALID_DN_SYNTAX: the dn was not well-formed
         """
         self.__validate_dn(dn, ldap.RES_DELETE)
-        try:
-            del self.objects[dn]
-            del self.raw_objects[dn]
-        except KeyError as exc:
-            raise ldap.NO_SUCH_OBJECT from exc
-
-    def _filter_attributes(self, obj: LDAPData, attrlist: List[str] = None) -> LDAPData:
-        """
-        Return just the attributes on ``obj`` named in ``attrlist``.   If
-        ``attrlist`` is ``None`` or "``*``"  is in ``attrlist``, return all
-        attributes on ``obj``.
-
-        Note:
-            We're doing a pretty simplistic implementation of this here, and we
-            don't currently support the "operational" attributes, e.g.
-            ``nsroledn``.
-
-        Args:
-            obj: the data for an LDAP object
-
-        Keyword Args:
-            attrlist: a list of attributes to include on ``obj``, removing
-                attributes not named
-
-        Returns:
-            A filtered set version of obj with only the attributes named in ``attrlist``.
-        """
-        if not attrlist or '*' in attrlist:
-            return deepcopy(obj)
-        return {attr: value for attr, value in obj.items() if attr in attrlist}
+        if not self.exists(dn):
+            raise ldap.NO_SUCH_OBJECT({
+                'msgtype': 101,
+                'msgid': 4,
+                'result': 32,
+                'desc': 'No such object',
+                'ctrls': [],
+            })
+        obj = self.copy(dn)
+        for hook_func in hooks.get('pre_delete', self.tags):
+            hook_func(self, (dn, obj), bind_dn=bind_dn)
+        del self.objects[dn]
+        del self.raw_objects[dn]
+        for hook_func in hooks.get('post_delete', self.tags):
+            hook_func(self, (dn, obj), bind_dn=bind_dn)
 
     def search_base(
         self,
@@ -899,9 +1012,20 @@ class ObjectStore:
         attrlist: List[str] = None,
     ) -> LDAPSearchResult:
         """
-        Do a :py:data:`ldap.SCOPE_BASE` search.  Return the requested attributes of the
-        object in our object store with ``dn`` of ``base`` that also matches
-        ``filterstr``.
+        Do a :py:data:`ldap.SCOPE_BASE` search.  Return the requested attributes
+        of the object in our object store with ``dn`` of ``base`` that also
+        matches ``filterstr``.
+
+        Note:
+            We return a :py:func:`copy.deepcopy` of the object, not the actual
+            object.  This ensures that if the caller modifies the object they
+            don't update the objects in us unintentionally.
+
+        Note:
+            Some attributes are "operational" and are not returned by default
+            They must be named specifically if you want them.  Example:
+
+            >>> store.search_base('thebasedn', '(objectclass=*)', ['*', 'createTimestamp'])
 
         Args:
             base: the dn of the object to return
@@ -930,9 +1054,9 @@ class ObjectStore:
                 # versions of our attribute names, because that's how LDAP
                 # works.  Filter.match() will take care of doing
                 # case-insensitive value comparisons
-                results.append((base, self._filter_attributes(data, attrlist)))
+                results.append((base, self.__filter_attributes(data, attrlist)))
         else:
-            results.append((base, self._filter_attributes(data, attrlist)))
+            results.append((base, self.__filter_attributes(data, attrlist)))
         return results
 
     def search_onelevel(
@@ -944,6 +1068,11 @@ class ObjectStore:
         """
         Do a :py:data:`ldap.SCOPE_ONELEVEL` search, for objects directly under
         basedn ``base`` that match ``filterstr``.
+
+        Note:
+            We return a :py:func:`copy.deepcopy` of each object, not the actual
+            object.  This ensures that if the caller modifies the object they
+            don't update the objects in us unintentionally.
 
         Args:
             base: the dn of the object to return
@@ -971,16 +1100,17 @@ class ObjectStore:
                 continue
             if filt:
                 if filt.match(data):
-                    results.append((dn, self._filter_attributes(self.raw_objects[dn], attrlist)))
+                    results.append((dn, self.__filter_attributes(self.raw_objects[dn], attrlist)))
             else:
-                results.append((dn, self._filter_attributes(self.raw_objects[dn], attrlist)))
+                results.append((dn, self.__filter_attributes(self.raw_objects[dn], attrlist)))
         return results
 
     def search_subtree(
         self,
         base: str,
         filterstr: str,
-        attrlist: List[str] = None
+        attrlist: List[str] = None,
+        include_operational_attributes: bool = False
     ) -> LDAPSearchResult:
         """
         Do a :py:data:`ldap.SCOPE_SUBTREE` search, for objects under basedn
@@ -990,8 +1120,15 @@ class ObjectStore:
             base: the dn of the object to return
             filterstr: the ldap filter string
 
+        Note:
+            We return a :py:func:`copy.deepcopy` of each object, not the actual
+            object.  This ensures that if the caller modifies the object they
+            don't update the objects in us unintentionally.
+
         Keyword Args:
             attrlist: the list of attributes to return for each object
+            include_operational_attributes: include all operational attributes even
+                if they are not named in ``attrlist``
 
         Raises:
             ldap.INVALID_DN_SYNTAX: ``base`` was not a well-formed DN
@@ -1002,17 +1139,34 @@ class ObjectStore:
         """
         self.__validate_dn(base, ldap.RES_SEARCH_RESULT)
         basedn_parts = ldap.dn.explode_dn(base.lower(), flags=ldap.DN_FORMAT_LDAPV3)
+
         filt = None
         if not self._DEFAULT_SEARCH_RE.search(filterstr):
             filt = self.__parse_filterstr(filterstr)
         results: LDAPSearchResult = []
         for dn, data in self.objects.items():
-            dn_parts = ldap.dn.explode_dn(dn.lower(), flags=ldap.DN_FORMAT_LDAPV3)
-            if dn_parts[-len(basedn_parts):] != basedn_parts:
-                continue
+            if basedn_parts:
+                # ``base`` was not the Root DN, so see if the object is under ``base``
+                dn_parts = ldap.dn.explode_dn(dn.lower(), flags=ldap.DN_FORMAT_LDAPV3)
+                if dn_parts[-len(basedn_parts):] != basedn_parts:
+                    continue
             if filt:
                 if filt.match(data):
-                    results.append((dn, self._filter_attributes(self.raw_objects[dn], attrlist)))
+                    results.append((
+                        dn,
+                        self.__filter_attributes(
+                            self.raw_objects[dn],
+                            attrlist,
+                            include_operational_attributes=include_operational_attributes
+                        )
+                    ))
             else:
-                results.append((dn, self._filter_attributes(self.raw_objects[dn], attrlist)))
+                results.append((
+                    dn,
+                    self.__filter_attributes(
+                        self.raw_objects[dn],
+                        attrlist,
+                        include_operational_attributes=include_operational_attributes
+                    )
+                ))
         return results

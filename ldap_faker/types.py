@@ -15,6 +15,7 @@ LDAPSearchResult = List[LDAPRecord]
 LDAPSearchDirectory = CaseInsensitiveDict[str, LDAPSearchResult]
 LDAPObjectStore = CaseInsensitiveDict[str, CILDAPData]
 RawLDAPObjectStore = CaseInsensitiveDict[str, LDAPData]
+Attrlist = CaseInsensitiveDict[str, str]
 
 # Return values
 # result: (result_type, result_data)
@@ -33,4 +34,4 @@ ModList = List[Tuple[int, str, List[bytes]]]
 AddModList = List[Tuple[str, List[bytes]]]
 
 # unittest support
-LDAPFixtureList = Union[str, List[Tuple[str, str]]]
+LDAPFixtureList = Union[str, Tuple[str, List[str]], List[Tuple[str, str, List[str]]]]
