@@ -69,7 +69,7 @@ Features:
 * If your code talks to more than one LDAP server, you can configure multiple fake LDAP "servers" with different sets of objects that correspond to different LDAP URIs.
 * Provides :py:class:`LDAPFakerMixin`, a mixin for :py:class:`unittest.TestCase`
 
-    * Automatically manages patching `python-ldap` for the code under test
+    * Automatically manages patching ``python-ldap`` for the code under test
     * Allows you to populate objects into one or more LDAP "servers" with fixture files
     * Provides the following test instrumentation for inspecting state after the test:
 
@@ -88,7 +88,7 @@ Quickstart
 The easiest way to use ``python-ldap-faker`` in your :py:mod:`unittest` based tests is to
 use the :py:class:`LDAPFakerMixin` mixin for :py:class:`unittest.TestCase`.
 
-This will patch :py:func:`ldap.initialize``, :py:func:`ldap.set_option` and
+This will patch :py:func:`ldap.initialize`, :py:func:`ldap.set_option` and
 :py:func:`ldap.get_option` to use our :py:class:`FakeLDAP` interface, and load
 fixtures in from JSON files to use as test data.
 

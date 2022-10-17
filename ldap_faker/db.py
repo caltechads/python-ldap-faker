@@ -873,7 +873,9 @@ class ObjectStore:
         for hook_func in hooks.get('pre_update', self.tags):
             hook_func(self, dn, modlist, bind_dn)
         # We want to use a deepcopy of our data here so we don't act directly
-        # on the data in the store before we do our self.set() (because hooks)
+        # on the data in the store before we do our self.set(); something may
+        # go wrong partway through the update (e.g. bad opcode) and we don't
+        # want partial updates to be reflected.
         # may need to look at what the object used to look like in a "pre_set"
         # hook.
 
@@ -929,9 +931,9 @@ class ObjectStore:
         Create an object in our store with dn of ``dn``.
 
         ``modlist`` is similar the one passed to :py:meth:`modify_s`, except
-        that the operation integer is omitted from the tuples in ``modlist``. You
-        might want to look into sub-module refmodule{ldap.modlist} for
-        generating the modlist.
+        that the operation integer is omitted from the tuples in ``modlist``.
+        You might want to look into sub-module ldap.modlist for generating the
+        modlist.
 
         Example:
             Here is an example of constructing a modlist for ``create``:
@@ -963,6 +965,7 @@ class ObjectStore:
         for hook_func in hooks.get('pre_create', self.tags):
             hook_func(self, dn, modlist, bind_dn)
         if self.exists(dn):
+            # FIXME: probably this error dict is not complete
             raise ldap.ALREADY_EXISTS({'info': '', 'desc': 'Object already exists'})
         entry = {}
         for item in modlist:
