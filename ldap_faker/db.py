@@ -145,13 +145,13 @@ class LDAPServerFactory:
         store.load_objects(filename)
         self.register(store, uri=uri)
 
-    def register(self, directory: "ObjectStore", uri: str = None) -> None:
+    def register(self, store: "ObjectStore", uri: str = None) -> None:
         """
         Register a new :py:class:`ObjectStore` to be used as our fake LDAP server for when
         we run our  fake ``initialize`` function.
 
         Args:
-            directory: a configured :py:class:`ObjectStore`
+            store: a configured :py:class:`ObjectStore`
 
         Keyword Args:
             uri: the LDAP uri to associated with ``directory``
@@ -173,13 +173,13 @@ class LDAPServerFactory:
                     'LDAPServerFactory: overriding existing default ObjectStore',
                     RuntimeWarning
                 )
-            self.default = directory
+            self.default = store
         if uri in self.servers:
             warnings.warn(
                 f'LDAPServerFactory: overriding existing ObjectStore for uri={uri}',
                 RuntimeWarning
             )
-        self.servers[cast(str, uri)] = directory
+        self.servers[cast(str, uri)] = store
 
     def get(self, uri: str) -> "ObjectStore":
         """

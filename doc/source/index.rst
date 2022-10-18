@@ -47,7 +47,7 @@ Features:
     * ``ldap.initialize``
     * ``ldap.set_option``
     * ``ldap.get_option``
-`
+
 * These ``ldap.ldapobject.LDAPObject`` methods are faked:
 
     * ``set_option``
@@ -64,13 +64,18 @@ Features:
     * ``rename_s``
     * ``delete_s``
 
-* For ``search_ext`` and ``search_s``, your filter string will be validated as a valid LDAP filter, and your filter will be applied directly to your objects in our fake "server" to generate the result list.  No canned searches!
-* Inspect your call history for all calls (name, arguments), and test the order in which they were made
-* If your code talks to more than one LDAP server, you can configure multiple fake LDAP "servers" with different sets of objects that correspond to different LDAP URIs.
-* Provides :py:class:`LDAPFakerMixin`, a mixin for :py:class:`unittest.TestCase`
+* For ``search_ext`` and ``search_s``, your filter string will be validated as a
+  valid LDAP filter, and your filter will be applied directly to your objects in
+  our fake "server" to generate the result list.  No canned searches!
+* Inspect your call history for all calls (name, arguments), and test the order
+  in which they were made
+* Simulate multiple fake LDAP "servers" with different sets of objects that
+  correspond to different LDAP URIs.
+* Ease your test setup with :py:class:`LDAPFakerMixin`, a mixin for
+  :py:class:`unittest.TestCase`
 
     * Automatically manages patching ``python-ldap`` for the code under test
-    * Allows you to populate objects into one or more LDAP "servers" with fixture files
+    * Populate objects into one or more LDAP "servers" with fixture files
     * Provides the following test instrumentation for inspecting state after the test:
 
         * Access to the full object store for each LDAP uri accessed
@@ -78,23 +83,29 @@ Features:
         * All ``python-ldap`` API calls made
         * All ``python-ldap`` LDAP options set
 
-    * Provides test isolation: object store changes, connections, call history, option changes are all reset between tests
+    * Provides test isolation: object store changes, connections, call history,
+      option changes are all reset between tests
     * Use handy LDAP specific asserts to ease your testing
 
+* Define your own hooks to change the behavior of your fake "servers"
+* Support behavior for specific LDAP implementations:
+
+    * Redhat Directory Server/389 implementation support: have your test believe
+      it's talking to an RHDS/389 server.
 
 Quickstart
 ==========
 
-The easiest way to use ``python-ldap-faker`` in your :py:mod:`unittest` based tests is to
-use the :py:class:`LDAPFakerMixin` mixin for :py:class:`unittest.TestCase`.
+The easiest way to use ``python-ldap-faker`` in your :py:mod:`unittest` based
+tests is to use the :py:class:`LDAPFakerMixin` mixin for
+:py:class:`unittest.TestCase`.
 
 This will patch :py:func:`ldap.initialize`, :py:func:`ldap.set_option` and
 :py:func:`ldap.get_option` to use our :py:class:`FakeLDAP` interface, and load
 fixtures in from JSON files to use as test data.
 
-
-Let's say we have a class ``App`` in our ``myapp`` module that does LDAP work that
-we want to test.
+Let's say we have a class ``App`` in our ``myapp`` module that does LDAP work
+that we want to test.
 
 First, prepare a file named ``data.json`` with the objects you want loaded into
 your fake LDAP server.   Let's say you want your data to consist of some
@@ -191,6 +202,8 @@ We can write our ``TestCase`` like so::
    :maxdepth: 2
 
    objectstore
+   implementations
    binds
    unittest
+   hooks
    api

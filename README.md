@@ -48,8 +48,8 @@ python -m unittest discover
 
 * For `search_ext` and `search_s`, your filter string will be validated as a valid LDAP filter, and your filter will be applied directly to your objects in our fake "server" to generate the result list.  No canned searches!
 * Inspect your call history for all calls (name, arguments), and test the order in which they were made
-* If your code talks to more than one LDAP server, you can configure multiple fake LDAP "servers" with different sets of objects that correspond to different LDAP URIs.
-* Provides `ldap_faker.LDAPFakerMixin`, a mixin for `unittest.TestCase`
+* Simulate multiple fake LDAP "servers" with different sets of objects that correspond to different LDAP URIs.
+* Ease your test setup with :py:class:`LDAPFakerMixin`, a mixin for :py:class:`unittest.TestCase`
 
     * Automatically manages patching `python-ldap` for the code under test
     * Allows you to populate objects into one or more LDAP "servers" with fixture files
@@ -62,6 +62,11 @@ python -m unittest discover
 
     * Provides test isolation: object store changes, connections, call history, option changes are all reset between tests
     * Use handy LDAP specific asserts to ease your testing
+
+* Define your own hooks to change the behavior of your fake "servers"
+* Support behavior for specific LDAP implementations:
+
+    * Redhat Directory Server/389 implementation support: have your test believe it's talking to an RHDS/389 server.
 
 ## Quickstart
 

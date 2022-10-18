@@ -50,6 +50,25 @@ LDAP Server like objects
     :inherited-members:
     :undoc-members:
 
+
+Hook management
+---------------
+
+.. autodata:: hooks
+
+.. autoclass:: Hook
+    :inherited-members:
+    :undoc-members:
+
+.. autoclass:: HookDefinition
+    :inherited-members:
+    :undoc-members:
+
+.. autoclass::HookRegistry
+    :inherited-members:
+    :undoc-members:
+
+
 Type Aliases
 ------------
 
