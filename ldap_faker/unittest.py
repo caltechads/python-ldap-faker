@@ -4,7 +4,7 @@ import sys
 from typing import Any, Dict, List, Optional, cast
 from unittest.mock import patch
 
-from .db import LDAPServerFactory
+from .db import LDAPServerFactory, ObjectStore
 from .faker import FakeLDAP, FakeLDAPObject
 from .types import LDAPFixtureList, LDAPOptionValue
 
@@ -141,11 +141,6 @@ class LDAPFakerMixin:
         Args:
             server_factory: the ``LDAPServerFactory`` object to populate
         """
-        if not cls.ldap_fixtures:
-            raise ValueError(
-                'Set the "ldap_fixtures" class variable either to the name of a JSON file to use '
-                'as your LDAP ObjectStore data, or to a list of (filename, ldap_uri) tuples.'
-            )
         if cls.ldap_fixtures:
             if isinstance(cls.ldap_fixtures, list):
                 for item in cls.ldap_fixtures:
@@ -159,6 +154,9 @@ class LDAPFakerMixin:
             else:
                 full_path = cls.resolve_file(cls.ldap_fixtures)
                 server_factory.load_from_file(full_path)
+        else:
+            # No servers were provided, so load a default empty ObjectStore
+            server_factory.register(ObjectStore())
 
     @classmethod
     def setUpClass(cls):
