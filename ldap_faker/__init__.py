@@ -1,4 +1,4 @@
-__version__ = "1.0.0"
+__version__ = "1.1.0"
 
 from .hooks import (  # noqa:F403,F401
     hooks,
