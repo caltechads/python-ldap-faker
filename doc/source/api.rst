@@ -64,7 +64,7 @@ Hook management
     :inherited-members:
     :undoc-members:
 
-.. autoclass::HookRegistry
+.. autoclass:: HookRegistry
     :inherited-members:
     :undoc-members:
 
