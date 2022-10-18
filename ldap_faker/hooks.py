@@ -151,8 +151,6 @@ class HookRegistry:
 
 hooks = HookRegistry()
 
-hooks.register_hook_definition('pre_initialize', 'Callable[[FakeLDAP, str, List[str]], None]')
-hooks.register_hook_definition('post_initialize', 'Callable[[FakeLDAP, str, List[str]], None]')
 hooks.register_hook_definition('post_objectstore_init', 'Callable[[ObjectStore], None]')
 hooks.register_hook_definition('pre_set', 'Callable[[ObjectStore, LDAPRecord, Optional[str]], None]')
 hooks.register_hook_definition('post_set', 'Callable[[ObjectStore, LDAPRecord, Optional[str]], None]')
