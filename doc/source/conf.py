@@ -40,7 +40,8 @@ extensions = [
     'sphinx.ext.napoleon',
     'sphinx.ext.viewcode',
     'sphinx.ext.intersphinx',
-    'sphinx_rtd_theme'
+    'sphinx_rtd_theme',
+    #'sphinx_json_globaltoc',
 ]
 
 source_suffix = ".rst"
