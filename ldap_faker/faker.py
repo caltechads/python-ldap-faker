@@ -8,6 +8,81 @@ from typing import Any, Dict, List, Optional, TextIO, cast
 from urllib.parse import urlparse
 
 import ldap
+from pyasn1.codec.ber import decoder
+from pyasn1.type import namedtype, tag, univ
+
+
+# SortKey definition
+class SortKey(univ.Sequence):
+    """
+    SortKey definition for the Server Side Sort control, OID 1.2.840.113556.1.4.473.
+    """
+
+    componentType: namedtype.NamedTypes = namedtype.NamedTypes(  # noqa: N815
+        namedtype.NamedType("attributeType", univ.OctetString()),
+        namedtype.OptionalNamedType(
+            "orderingRule",
+            univ.OctetString().subtype(
+                explicitTag=tag.Tag(tag.tagClassContext, tag.tagFormatSimple, 0)
+            ),
+        ),
+        namedtype.DefaultedNamedType(
+            "reverseOrder",
+            univ.Boolean(False).subtype(  # noqa: FBT003
+                explicitTag=tag.Tag(tag.tagClassContext, tag.tagFormatSimple, 1)
+            ),
+        ),
+    )
+
+
+# SortKeyList is a sequence of SortKeys
+class SortKeyList(univ.SequenceOf):
+    """
+    SortKeyList is a sequence of SortKeys.  Used to decode the controlValue for the
+    Server Side Sort control, OID 1.2.840.113556.1.4.473.
+    """
+
+    componentType: univ.Sequence = SortKey()  # type: ignore[assignment]  # noqa: N815
+
+
+def decode_sort_control_value(control_value: bytes) -> list[str]:
+    """
+    Decode BER-encoded controlValue for Server Side Sort control using python-asn1.
+
+    The controlValue should contain a SEQUENCE of SEQUENCEs, each with an
+    attributeType (OCTET STRING).  See RFC 2891 for the Server Side Sort control
+    ASN.1 definition.
+
+    Args:
+        control_value: BER-encoded control value
+
+    Returns:
+        List of attribute names to sort by
+
+    """
+    if not control_value:
+        return []
+        # Extract the controlValue
+    ber_value = control_value
+
+    # Decode using pyasn1
+    decoded, remainder = decoder.decode(ber_value, asn1Spec=SortKeyList())
+
+    sort_keys = []
+    # Loop through each sort key
+    for key in decoded:
+        attr = str(key.getComponentByName("attributeType"))
+
+        rule = key.getComponentByName("orderingRule")
+        rule = str(rule) if rule.isValue else None
+
+        reverse_order = key.getComponentByName("reverseOrder")
+        reverse_order = bool(reverse_order) if reverse_order.isValue else False
+        if reverse_order:
+            attr = f"-{attr}"
+        sort_keys.append(attr)
+    return sort_keys
+
 
 from .db import (
     CallHistory,
@@ -434,18 +509,164 @@ class FakeLDAPObject:
         timeout: int = -1,
         sizelimit: int = 0
     ) -> int:
+        """
+        Performs a search.
+
+        This method supports the following LDAP controls in the serverctrls list:
+
+        - 1.2.840.113556.1.4.319 (Paged Results): Sets a cookie on the control for paging
+        - 1.2.840.113556.1.4.473 (Server Side Sort): Sorts results by specified attributes
+
+        Examples:
+            Paged Search:
+
+            .. code-block:: python
+
+                import ldap
+                from ldap.controls import SimplePagedResultsControl
+
+                # Create paged results control
+                page_control = SimplePagedResultsControl(True, size=10, cookie='')
+
+                # Perform paged search
+                msgid = conn.search_ext(
+                    'ou=users,dc=example,dc=com',
+                    ldap.SCOPE_SUBTREE,
+                    '(objectClass=person)',
+                    serverctrls=[page_control]
+                )
+
+                # Get results
+                rtype, rdata, rmsgid, rctrls = conn.result3(msgid)
+
+                # Check for more pages
+                for ctrl in rctrls:
+                    if ctrl.controlType == '1.2.840.113556.1.4.319':
+                        if ctrl.cookie:
+                            # More pages available
+                            page_control.cookie = ctrl.cookie
+                            # Continue with next page...
+
+            Server Side Sort:
+
+            .. code-block:: python
+
+                import ldap
+                from ldap.controls import LDAPControl
+
+                # Create sort control (sort by cn, then by uid)
+                # The controlValue should contain the sort keys in BER format
+                # For this fake implementation, we'll use simple UTF-8 encoding
+                sort_keys = ['cn', 'uid']
+                control_value = ','.join(sort_keys).encode('utf-8')
+                encoded_control_value = ldap.encode_sort_control_value(control_value)
+                sort_control = LDAPControl(
+                    '1.2.840.113556.1.4.473',
+                    True,
+                    encoded_control_value,
+                )
+
+                # Perform sorted search
+                msgid = conn.search_ext(
+                    'ou=users,dc=example,dc=com',
+                    ldap.SCOPE_SUBTREE,
+                    '(objectClass=person)',
+                    serverctrls=[sort_control]
+                )
+
+                # Get sorted results
+                rtype, rdata, rmsgid, rctrls = conn.result3(msgid)
+
+            Paged Search with Server Side Sort:
+
+            .. code-block:: python
+
+                import ldap
+                from ldap.controls import SimplePagedResultsControl, LDAPControl
+
+                # Create both controls
+                page_control = SimplePagedResultsControl(True, size=5, cookie='')
+                sort_keys = ['cn']
+                control_value = ','.join(sort_keys).encode('utf-8')
+                encoded_control_value = ldap.encode_sort_control_value(control_value)
+                sort_control = LDAPControl(
+                    '1.2.840.113556.1.4.473',
+                    True,
+                    encoded_control_value,
+                )
+
+                # Perform paged and sorted search
+                msgid = conn.search_ext(
+                    'ou=users,dc=example,dc=com',
+                    ldap.SCOPE_SUBTREE,
+                    '(objectClass=person)',
+                    serverctrls=[page_control, sort_control]
+                )
+
+                # Get results (sorted and paged)
+                rtype, rdata, rmsgid, rctrls = conn.result3(msgid)
+
+        Keyword Args:
+            base: the base DN for the search
+            scope: the scope of the search
+            filterstr: the filter to use for the search
+            attrlist: the list of attributes to return for each object
+            attrsonly: if 1, return only the attribute values; if 0, return the
+            entire object
+            serverctrls: server controls (supports Paged Results and Server Side Sort)
+            clientctrls: client controls (ignored)
+            timeout: timeout for the search (ignored)
+            sizelimit: size limit for the search (applied after sorting)
+
+        Returns:
+            The message ID of the search
+
+        """  # noqa: E501
         msgid = self.current_msgid
-        serverctrls[0].cookie = b'%d' % msgid  # type: ignore
+        if serverctrls:
+            # Find the Paged Results control (OID: 1.2.840.113556.1.4.319) and
+            # set the cookie on it
+            for ctrl in serverctrls:
+                if getattr(ctrl, "controlType", None) == "1.2.840.113556.1.4.319":
+                    ctrl.cookie = b"%d" % msgid
+                    break
         self._async_results[msgid] = {}
-        self._async_results[msgid]['ctrls'] = serverctrls
+        self._async_results[msgid]["ctrls"] = serverctrls
         value = self._search_s(base, scope, filterstr, attrlist, attrsonly)
-        self._async_results[msgid]['data'] = value
+
+        # --- LDAP sort control simulation ---
+        # If a control with OID 1.2.840.113556.1.4.473 is present, sort the results.
+        # We decode the BER-encoded controlValue to get the sort keys.
+        if serverctrls:
+            for ctrl in serverctrls:
+                if getattr(ctrl, "controlType", None) == "1.2.840.113556.1.4.473":
+                    # Decode the BER-encoded controlValue to get sort keys
+                    control_value = getattr(ctrl, "controlValue", None)
+                    if control_value:
+                        sort_keys = decode_sort_control_value(control_value)
+                        if sort_keys:
+                            # value is a list of (dn, attrs) tuples
+                            def sort_func(item):
+                                dn, attrs = item
+                                # Support multi-key sort
+                                return tuple(
+                                    attrs.get(key, [b""])[0].lower()
+                                    if attrs.get(key)
+                                    else b""
+                                    for key in sort_keys  # noqa: B023
+                                )
+
+                            value = sorted(value, key=sort_func)
+                    break
+        # --- end sort control simulation ---
+
         # --- LDAP size limit simulation ---
         # Apply size limit if specified (0 means no limit)
         if sizelimit > 0 and len(value) > sizelimit:
             value = value[:sizelimit]
         # --- end size limit simulation ---
 
+        self._async_results[msgid]["data"] = value
         self.current_msgid += 1
         return msgid
 
