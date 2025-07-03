@@ -4,10 +4,11 @@ clean:
 	find . -name "__pycache__" | xargs rm -rf
 
 dist: clean
-	@python setup.py sdist
-	@python setup.py bdist_wheel --universal
+	@python -m build
 
-pypi: dist
+release: dist
+	@bin/release.sh
+
 	@twine upload dist/*
 
 tox:

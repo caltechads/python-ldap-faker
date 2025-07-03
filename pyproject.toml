@@ -1,6 +1,192 @@
+[project]
+name = "python-ldap-faker"
+version = "1.1.0"
+description = "Fake python-ldap functions, objects and methods for use in testing."
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [
+    {name = "Caltech IMSS ADS", email = "cmalek@caltech.edu"}
+]
+keywords = ["ldap", "testing"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: BSD License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Testing",
+    "Typing :: Typed"
+]
+dependencies = [
+    "python-ldap>=3.4.4",
+    "case-insensitive-dictionary>=0.2.1",
+    "ldap-filter>=0.2.0",
+    "asn1>=3.1.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/caltechads/python-ldap-faker"
+Documentation = "https://python-ldap-faker.readthedocs.io/en/latest/"
+Source = "https://github.com/caltechads/python-ldap-faker"
+Issues = "https://github.com/caltechads/python-ldap-faker/issues"
+
+[tool.uv]
+python-preference = "only-system"
+default-groups = ["docs", "test"]
+
+[dependency-groups]
+dev = [
+    "build>=1.2.2.post1",
+    "wheel>=0.38.0",
+]
+test = [
+    "nose>=1.3.7",
+    "coverage>=5.0.3",
+    "pytest>=8.4.1",
+]
+docs = [
+    "sphinx<=7",
+    "sphinx-rtd-theme>=2.0.0",
+]
+
 [build-system]
 requires = [
     "setuptools >= 48",
     "wheel >= 0.29.0",
 ]
 build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+where = ["."]
+exclude = ["bin", "test"]
+
+[tool.setuptools.package-data]
+ldap_faker = ["py.typed"]
+
+[tool.mypy]
+exclude = "(^build/.*$|^docs/.*\\.py$|ldap_faker/test/test_*.\\.py$)"
+# LDAP has a lot of magic that makes attributes appear after instance instantiation,
+# so we need to disable this check.
+disable_error_code = ["attr-defined"]
+
+[[tool.mypy.overrides]]
+module = "ldap.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "ldap_filter.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "setuptools.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "sphinx_rtd_theme.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "pyasn1.*"
+ignore_missing_imports = true
+
+[tool.ruff]
+# Same as Black.
+line-length = 88
+indent-width = 4
+target-version = "py310"
+exclude = [".venv", "build", "dist", "*/tests*"]
+
+[tool.ruff.lint]
+select = ["ALL"]
+fixable = ["ALL"]
+unfixable = []
+dummy-variable-rgx = "^(_+|(_+[a-zA-Z0-9_]*[a-zA-Z0-9]+?))$"
+ignore = [
+    #### modules
+    "ANN", # flake8-annotations
+    "COM", # flake8-commas
+    "C90", # mccabe complexity
+    "TID", # flake8-tidy-imports
+
+    #### specific rules
+    "CPY001",   # ignore missing copyright notices
+    "D100",     # Missing docstring in public module
+    "D102",     # Missing docstring in public method
+    "D103",     # Missing docstring in public function
+    "D104",     # Missing docstring in public package
+    "D105",     # Missing docstring in magic method
+    "D106",     # Missing docstring in nested class
+    "D107",     # ignore Missing docstring in __init__ method
+    "D203",     # 1 blank required before class docstring
+    "D200",     # One-line docstring should fit on one line
+    "D205",     # 1 blank line required between summary line and description
+    "D212",     # Multi-line docstring summary should start at the first line
+    "D400",     # First line should end with a period
+    "D401",     # First line of docstring should be in imperative mood
+    "D415",     # First line should end with a period, question mark, or exclamation point
+    "DOC201",   # Ignore missing "Return" section in docstring
+    "E402",     # false positives for local imports
+    "FIX002",   # Line contains "TODO", consider resolving the issue
+    "N818",     # stop bugging me about not ending my exceptions with "Error"
+    "PLC0415",  # Ignore imports that aren't at the top level. Sometimes that's needed to avoid circular imports.
+    "S603",     # ignore subprocess calls that do not check return code
+    "S607",     # ignore subprocess programs that are not absolute paths
+    "SIM102",   # combine nested ifs
+    "SLF001",   # Ignore access to attributes starting with a single _. LDAP's magic is used all over the place.
+    "TD002",    # Missing author in TODO; try: # TODO(<author_name>): ... or # TODO @<author_name>:
+    "TD003",    # Missing issue link on the line following this TODO
+    "FBT001",   # stop bugging me about booleans in function signatures
+    "FBT002",   # stop bugging me about booleans in function signatures
+    "PT009",    # use regular assert instead of unittest asserts
+]
+
+[tool.ruff.format]
+# Like Black, use double quotes for strings.
+quote-style = "double"
+# Like Black, indent with spaces, rather than tabs.
+indent-style = "space"
+# Like Black, respect magic trailing commas.
+skip-magic-trailing-comma = false
+# Like Black, automatically detect the appropriate line ending.
+line-ending = "auto"
+# Disable auto-formatting of code examples in docstrings
+docstring-code-format = false
+# Set the line length limit used when formatting code snippets in
+# docstrings.
+docstring-code-line-length = "dynamic"
+
+[tool.ruff.lint.pylint]
+# LDAP signal handlers use a lot of positional args.
+max-args = 10
+max-positional-args = 10
+
+[tool.ruff.lint.per-file-ignores]
+"**/test_*.py" = ["D101", "D102", "N802", "N801", "N999"]
+
+[tool.pyright]
+allowUntypedLibraries = true
+enableTypeIgnoreComments = true
+reportExplicitAny = "none"
+reportAny = "none"
+reportAttributeAccessIssue = "none"
+reportUnusedParameter = "none"
+reportUnusedVariable = "none"
+reportUnusedFunction = "none"
+reportUnusedClass = "none"
+reportUnknownVariableType = "none"
+reportUnknownReturnType = "none"
+reportUnknownParameterType = "none"
+reportUnknownArgumentType = "none"
+reportUnknownAttributeType = "none"
+reportUnknownMemberType = "none"
+reportMissingParameterType = "none"
+reportPrivateUsage = "none"
