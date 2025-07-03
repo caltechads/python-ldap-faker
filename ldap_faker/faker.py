@@ -440,6 +440,12 @@ class FakeLDAPObject:
         self._async_results[msgid]['ctrls'] = serverctrls
         value = self._search_s(base, scope, filterstr, attrlist, attrsonly)
         self._async_results[msgid]['data'] = value
+        # --- LDAP size limit simulation ---
+        # Apply size limit if specified (0 means no limit)
+        if sizelimit > 0 and len(value) > sizelimit:
+            value = value[:sizelimit]
+        # --- end size limit simulation ---
+
         self.current_msgid += 1
         return msgid
 
