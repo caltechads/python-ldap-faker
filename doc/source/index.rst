@@ -63,6 +63,7 @@ Features:
     * ``modify_s``
     * ``rename_s``
     * ``delete_s``
+    * ``modrdn_s``
 
 * For ``search_ext`` and ``search_s``, your filter string will be validated as a
   valid LDAP filter, and your filter will be applied directly to your objects in

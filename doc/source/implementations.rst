@@ -8,7 +8,9 @@ Real LDAP implementations (Redhat Directory Server, 389, openldap, Active
 Directory) can have special behavior and side-effects that you may need to
 support in order to run your tests properly.
 
-Currently, we support some special behavior for one implementation: `Redhat Directory Server/389 <https://access.redhat.com/documentation/en-us/red_hat_directory_server/11/html/administration_guide/index>`_.
+Currently, we support some special behavior for one implementation: `Redhat
+Directory Server/389
+<https://access.redhat.com/documentation/en-us/red_hat_directory_server/11/html/administration_guide/index>`_.
 
 Redhat Directory Server/389
 ---------------------------
