@@ -14,6 +14,7 @@ non-anonymous bind:
 * ``delete_s``
 * ``modify_s``
 * ``rename_s``
+* ``modrdn_s``
 
 Anonymous binds
 ---------------

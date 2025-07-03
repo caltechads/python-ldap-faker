@@ -677,6 +677,45 @@ class FakeLDAPObject:
         newdn = newrdn + ',' + basedn
         attr, value = newrdn.split('=')
         entry[attr] = [value.encode('utf-8')]
+    @needs_bind
+    @record_call
+    def modrdn_s(
+        self,
+        dn: str,
+        newrdn: str,
+        delold: int = 1,
+        serverctrls: list[ldap.controls.LDAPControl] | None = None,  # noqa: ARG002
+        clientctrls: list[ldap.controls.LDAPControl] | None = None,  # noqa: ARG002
+    ) -> None:
+        """
+        Modify the RDN (Relative Distinguished Name) of an entry.
+
+        This method changes the RDN of the entry with DN ``dn`` to ``newrdn``.
+        Unlike :py:meth:`rename_s`, this method does not support moving entries
+        to a different parent DN.
+
+        Args:
+            dn: the DN of the object whose RDN is to be changed
+            newrdn: the new RDN
+
+        Keyword Args:
+            delold: if 1, delete the old entry after renaming, if 0, don't
+            serverctrls: server controls (ignored)
+            clientctrls: client controls (ignored)
+
+        Raises:
+            ldap.NO_SUCH_OBJECT: no object with DN of ``dn`` exists in our object store
+            ldap.INSUFFICIENT_ACCESS: you need to do a non-anonymous bind before
+                doing this
+
+        """
+        entry = self.store.copy(dn)
+        # Extract the base DN (everything after the first RDN)
+        basedn = ",".join(dn.split(",")[1:])
+        newdn = newrdn + "," + basedn
+        # Extract the attribute name and value from the new RDN
+        attr, value = newrdn.split("=")
+        entry[attr] = [value.encode("utf-8")]
         self.store.set(newdn, entry, bind_dn=self.bound_dn)
         if delold and dn != newrdn:
             self.store.delete(dn, bind_dn=self.bound_dn)
