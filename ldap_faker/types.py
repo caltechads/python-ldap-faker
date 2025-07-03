@@ -1,37 +1,39 @@
-from typing import Dict, Tuple, List, Union
+from typing import TYPE_CHECKING
 
 from case_insensitive_dict import CaseInsensitiveDict
-import ldap
+
+if TYPE_CHECKING:
+    import ldap
 
 # ====================================
 # Types
 # ====================================
 
 # LDAP records and objects
-LDAPData = Dict[str, List[bytes]]
-CILDAPData = CaseInsensitiveDict[str, List[str]]
-LDAPRecord = Tuple[str, LDAPData]
-LDAPSearchResult = List[LDAPRecord]
+LDAPData = dict[str, list[bytes]]
+CILDAPData = CaseInsensitiveDict[str, list[str]]
+LDAPRecord = tuple[str, LDAPData]
+LDAPSearchResult = list[LDAPRecord]
 LDAPSearchDirectory = CaseInsensitiveDict[str, LDAPSearchResult]
 LDAPObjectStore = CaseInsensitiveDict[str, CILDAPData]
 RawLDAPObjectStore = CaseInsensitiveDict[str, LDAPData]
 Attrlist = CaseInsensitiveDict[str, str]
 
 # Return values
-# result: (result_type, result_data)
-Result = Tuple[Union[int, str], LDAPSearchResult]
+# result: (result_type, result_data)  # noqa: ERA001
+Result = tuple[int | str, LDAPSearchResult]
 # result: (result_type, result_data, decoded server controls)
-Result2 = Tuple[Union[int, str], LDAPSearchResult, int, List[ldap.controls.LDAPControl]]
+Result2 = tuple[int | str, LDAPSearchResult, int, list["ldap.controls.LDAPControl"]]  # type: ignore[attr-defined]
 # result: (result_type, result_data, decoded server controls)
-Result3 = Tuple[Union[int, str], LDAPSearchResult, int, List[ldap.controls.LDAPControl]]
+Result3 = tuple[int | str, LDAPSearchResult, int, list["ldap.controls.LDAPControl"]]  # type: ignore[attr-defined]
 
 # Options
-LDAPOptionValue = Union[int, str]
-LDAPOptionStore = Dict[int, LDAPOptionValue]
+LDAPOptionValue = int | str
+LDAPOptionStore = dict[int, LDAPOptionValue]
 
 # Modlists
-ModList = List[Tuple[int, str, List[bytes]]]
-AddModList = List[Tuple[str, List[bytes]]]
+ModList = list[tuple[int, str, list[bytes]]]
+AddModList = list[tuple[str, list[bytes]]]
 
 # unittest support
-LDAPFixtureList = Union[str, Tuple[str, List[str]], List[Tuple[str, str, List[str]]]]
+LDAPFixtureList = str | tuple[str, list[str]] | list[tuple[str, str, list[str]]]

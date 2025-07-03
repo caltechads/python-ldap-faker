@@ -1,21 +1,24 @@
 from __future__ import annotations
-from pathlib import Path
+
 import sys
-from typing import Any, Dict, List, Optional, cast
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, ClassVar, cast
 from unittest.mock import patch
 
 from .db import LDAPServerFactory, ObjectStore
 from .faker import FakeLDAP, FakeLDAPObject
-from .types import LDAPFixtureList, LDAPOptionValue
+
+if TYPE_CHECKING:
+    from .types import LDAPFixtureList, LDAPOptionValue
 
 
 class LDAPFakerMixin:
     """
-    This is a mixin for use with :py:class:`unittest.TestCase`.  Properly
-    configured, it will patch :py:func:`ldap.initialize` to use our
-    :py:meth:`FakeLDAP.initialize` fake function instead, which will
-    return :py:class:`FakeLDAPObject` objects
-    instead of :py:class:`ldap.ldapobject.LDAPObject` objects.
+    A mixin for use with :py:class:`unittest.TestCase`.  Properly configured, it
+    will patch :py:func:`ldap.initialize` to use our
+    :py:meth:`FakeLDAP.initialize` fake function instead, which will return
+    :py:class:`FakeLDAPObject` objects instead of
+    :py:class:`ldap.ldapobject.LDAPObject` objects.
 
     :py:attr:`ldap_modules` is a list of python module paths in which we should
     patch :py:func:`ldap.initialize` with our :py:meth:`FakeLDAP.initialize`
@@ -76,13 +79,18 @@ class LDAPFakerMixin:
         Directory Server).
     """
 
-    ldap_modules: List[str] = []  #: The list of python paths to modules that import ``ldap``
-    ldap_fixtures: Optional[LDAPFixtureList] = None  #: The filenames of fixtures to load into our fake LDAP servers
+    #: The list of python paths to modules that import ``ldap``
+    ldap_modules: ClassVar[list[str]] = []
+    ldap_fixtures: LDAPFixtureList | None = (
+        None  #: The filenames of fixtures to load into our fake LDAP servers
+    )
 
-    def __init__(self, *args, **kwargs):
-        self.server_factory: LDAPServerFactory  \
-            #: The :py:class:`LDAPServerFactory` configured by our :py:meth:`setUpClass`
-        self.fake_ldap: FakeLDAP  #: the :py:class:`FakeLDAP` instance created by :py:meth:`setUp`
+    def __init__(self, *args, **kwargs) -> None:
+        #: The :py:class:`LDAPServerFactory` configured by our :py:meth:`setUpClass`
+        self.server_factory: LDAPServerFactory
+        #: The :py:class:`FakeLDAP` instance created by :py:meth:`setUp`
+        self.fake_ldap: FakeLDAP
+        self.patches: list[Any]
         self.check()
         super().__init__(*args, **kwargs)
 
@@ -93,11 +101,13 @@ class LDAPFakerMixin:
         :meta private:
         """
         if not self.ldap_modules:
-            raise ValueError(
-                'Set the "ldap_modules" class variable to the list of python paths to modules '
-                'in which we will need to patch "ldap.initialize".  These should be the paths '
-                'of all python files in which you see "import ldap".'
+            msg = (
+                'Set the "ldap_modules" class variable to the list of python paths '
+                'to modules in which we will need to patch "ldap.initialize".  These '
+                'should be the paths of all python files in which you see "import '
+                'ldap".'
             )
+            raise ValueError(msg)
 
     @classmethod
     def resolve_file(cls, filename: str) -> str:
@@ -115,13 +125,15 @@ class LDAPFakerMixin:
 
         Returns:
             The absolute path to the fixture file.
+
         """
         full_path = Path(filename)
         if not full_path.is_absolute():
-            dirname = Path(cast(str, sys.modules[cls.__module__].__file__)).parent
+            dirname = Path(cast("str", sys.modules[cls.__module__].__file__)).parent
             full_path = dirname / filename
         if not full_path.exists():
-            raise FileNotFoundError(f'{full_path} does not exist')
+            msg = f"{full_path} does not exist"
+            raise FileNotFoundError(msg)
         return str(full_path)
 
     @classmethod
@@ -140,6 +152,7 @@ class LDAPFakerMixin:
 
         Args:
             server_factory: the ``LDAPServerFactory`` object to populate
+
         """
         if cls.ldap_fixtures:
             if isinstance(cls.ldap_fixtures, list):
@@ -164,8 +177,8 @@ class LDAPFakerMixin:
         Build the ``LDAPServerFactory`` we'll use and save it as a class attribute.
 
         We do this as a classmethod because constructing our
-        :py:class:`ObjectStore` objects is time consuming and we don't want to have to do it
-        for each of our tests.
+        :py:class:`ObjectStore` objects is time consuming and we don't want to
+        have to do it for each of our tests.
         """
         cls.server_factory = LDAPServerFactory()
         cls.load_servers(cls.server_factory)
@@ -173,11 +186,12 @@ class LDAPFakerMixin:
     @classmethod
     def tearDownClass(cls):
         """
-        Delete our :py:attr:`server_factory` so we con't corrupt future tests or leak memory.
+        Delete our :py:attr:`server_factory` so we con't corrupt future tests or
+        leak memory.
         """
         del cls.server_factory
 
-    def setUp(self):
+    def setUp(self) -> None:
         """
         Create a :py:class:`FakeLDAP` instance, make it use the
         :py:attr:`server_factory` that our :py:meth:`setUpClass` created, and
@@ -186,16 +200,16 @@ class LDAPFakerMixin:
         :py:class:`FakeLDAP` instance to our :py:attr:`fake_ldap` attribute for
         later use in our test code.
         """
-        self.fake_ldap: FakeLDAP = FakeLDAP(self.server_factory)
+        self.fake_ldap = FakeLDAP(self.server_factory)
         self.patches = []
         for mod in self.ldap_modules:
-            init_patch = patch(f'{mod}.ldap.initialize', self.fake_ldap.initialize)
+            init_patch = patch(f"{mod}.ldap.initialize", self.fake_ldap.initialize)
             init_patch.start()
             self.patches.append(init_patch)
-            set_patch = patch(f'{mod}.ldap.set_option', self.fake_ldap.set_option)
+            set_patch = patch(f"{mod}.ldap.set_option", self.fake_ldap.set_option)
             set_patch.start()
             self.patches.append(set_patch)
-            get_patch = patch(f'{mod}.ldap.get_option', self.fake_ldap.get_option)
+            get_patch = patch(f"{mod}.ldap.get_option", self.fake_ldap.get_option)
             get_patch.start()
             self.patches.append(get_patch)
 
@@ -208,7 +222,7 @@ class LDAPFakerMixin:
 
     # Helpers
 
-    def last_connection(self) -> Optional[FakeLDAPObject]:
+    def last_connection(self) -> FakeLDAPObject | None:
         """
         Return the :py:class:`FakeLDAPObject` for the last connection made
         during ourtest.  Hopefully a useful shortcut for when we only make one
@@ -216,12 +230,13 @@ class LDAPFakerMixin:
 
         Returns:
             The last connection made
+
         """
         if self.fake_ldap.connections:
             return self.fake_ldap.connections[-1]
         return None
 
-    def get_connections(self, uri: str = None) -> List[FakeLDAPObject]:
+    def get_connections(self, uri: str | None = None) -> list[FakeLDAPObject]:
         """
         Return a the list of :py:class:`FakeLDAPObject` objects generated during
         our test, optionally filtered by LDAP URI.
@@ -237,28 +252,30 @@ class LDAPFakerMixin:
 
     # Asserts
 
-    def assertGlobalOptionSet(self, option: int, value: LDAPOptionValue) -> None:
+    def assertGlobalOptionSet(self, option: int, value: LDAPOptionValue) -> None:  # noqa: N802
         """
         Assert that a global LDAP option was set.
 
         Args:
             option: an LDAP option (e.g. ldap.OPT_DEBUG_LEVEL)
             value: the value we expect the option to be set to
-        """
-        self.assertGlobalFunctionCalled('set_option')
-        self.assertTrue(option in self.fake_ldap.options)   # type: ignore
-        self.assertEqual(self.fake_ldap.options[option], value)  # type: ignore
 
-    def assertGlobalFunctionCalled(self, api_name: str) -> None:
+        """
+        self.assertGlobalFunctionCalled("set_option")
+        self.assertTrue(option in self.fake_ldap.options)  # type: ignore[attr-defined,operator]
+        self.assertEqual(self.fake_ldap.options[option], value)  # type: ignore[attr-defined,operator,index]
+
+    def assertGlobalFunctionCalled(self, api_name: str) -> None:  # noqa: N802
         """
         Assert that a global LDAP function was called.
 
         Args:
             api_name: the name of the function to look for (e.g. ``initialize``)
-        """
-        self.asserTrue(api_name in self.fake_ldap.calls.names)  # type: ignore
 
-    def assertLDAPConnectionOptionSet(
+        """
+        self.assertTrue(api_name in self.fake_ldap.calls.names)
+
+    def assertLDAPConnectionOptionSet(  # noqa: N802
         self,
         conn: FakeLDAPObject,
         option: str,
@@ -272,16 +289,17 @@ class LDAPFakerMixin:
             conn: the connection object to examine
             option: the code for the option (e.g. :py:data:`ldap.OPT_X_TLS_NEWCTX`)
             value: the value we expect the option to be set to
-        """
-        self.assertLDAPConnectionMethodCalled(conn, 'set_option')
-        self.assertTrue(option in conn.options)   # type: ignore
-        self.assertEqual(conn.options[option], value)  # type: ignore
 
-    def assertLDAPConnectionMethodCalled(
+        """
+        self.assertLDAPConnectionMethodCalled(conn, "set_option")
+        self.assertTrue(option in conn.options)  # type: ignore[attr-defined,operator]
+        self.assertEqual(conn.options[option], value)  # type: ignore[attr-defined,operator,index]
+
+    def assertLDAPConnectionMethodCalled(  # noqa: N802
         self,
         conn: FakeLDAPObject,
         api_name: str,
-        arguments: Dict[str, Any] = None
+        arguments: dict[str, Any] | None = None,
     ) -> None:
         """
         Assert that a specific :py:class:`FakeLDAPObject` method was called, possibly
@@ -295,32 +313,32 @@ class LDAPFakerMixin:
             arguments: if given, assert that the call exists AND was called this set
                 of arguments.  See :py:class:`LDAPCallRecord` for how the ``arguments``
                 dict should be constructed.
+
         """
         if not arguments:
-            self.assertNotEqual(api_name in conn.calls.names)  # type: ignore
+            self.assertNotEqual(api_name in conn.calls.names)
         for call in conn.calls.filter_calls(api_name):
             if call.args == arguments:
                 return
-        self.fail(f'No call for "{api_name}" with args {arguments} found.')  # type: ignore
+        msg = f'No call for "{api_name}" with args {arguments} found.'
+        self.fail(msg)
 
-    def assertLDAPConnectionMethodCalledAfter(
-        self,
-        conn: FakeLDAPObject,
-        api_name: str,
-        target_api_name: str
+    def assertLDAPConnectionMethodCalledAfter(  # noqa: N802
+        self, conn: FakeLDAPObject, api_name: str, target_api_name: str
     ) -> None:
         """
-        Assert that a specific :py:class:`FakeLDAPObject` method was called after another
-        specific :py:class:`FakeLDAPObject` method.
+        Assert that a specific :py:class:`FakeLDAPObject` method was called
+        after another specific :py:class:`FakeLDAPObject` method.
 
         Args:
             conn: the connection object to examine
             api_name: the name of the function to look for (e.g. ``simple_bind_s``)
             target_api_name: the name of the function which should appear before
                 ``api_name`` in the call history
+
         """
         self.assertLDAPConnectionMethodCalled(conn, target_api_name)
         self.assertLDAPConnectionMethodCalled(conn, api_name)
         api_names = conn.calls.names
-        self.assertTrue(api_names.index(api_name) > api_names.index(target_api_name))  # type: ignore
-        self.assertNotEqual(api_name in conn.calls.names)  # type: ignore
+        self.assertTrue(api_names.index(api_name) > api_names.index(target_api_name))
+        self.assertNotEqual(api_name in conn.calls.names)

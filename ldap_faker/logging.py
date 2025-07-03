@@ -1,4 +1,3 @@
 import logging
 
-
-logger = logging.getLogger('ldapfaker')
+logger = logging.getLogger("ldapfaker")

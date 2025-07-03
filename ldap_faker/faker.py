@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from functools import wraps
 import inspect
 import json
 import sys
-from typing import Any, Dict, List, Optional, TextIO, cast
+from functools import wraps
+from typing import TYPE_CHECKING, Any, TextIO, cast
 from urllib.parse import urlparse
 
 import ldap
@@ -92,39 +92,42 @@ from .db import (
     OptionStore,
 )
 from .logging import logger
-from .types import (
-    LDAPOptionValue,
-    LDAPRecord,
-    ModList,
-    AddModList,
-    Result3
-)
 
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from .types import AddModList, LDAPOptionValue, LDAPRecord, ModList, Result3
 
 # ====================================
 # Decorators
 # ====================================
 
-class BytesEncoder(json.JSONEncoder):
 
-    def default(self, o):
+class BytesEncoder(json.JSONEncoder):
+    """
+    Encode bytes as strings.
+    """
+
+    def default(self, o: Any) -> str | int | float | bool | None:
         if isinstance(o, bytes):
             return o.decode()
         return json.JSONEncoder.default(self, o)
 
 
-def record_call(func):
+def record_call(func: Callable[..., Any]) -> Callable[..., Any]:
     """
     Save a record of the call to ``func`` so that our tests can inspect it later.
     """
+
     @wraps(func)
-    def inner(*args, **kwargs):
+    def inner(*args, **kwargs) -> Any:
         sig = inspect.signature(func)
         args_dict = dict(sig.bind(*args, **kwargs).arguments)
-        args_dict['self'].calls.register(func.__name__, args_dict)
-        del args_dict['self']
+        args_dict["self"].calls.register(func.__name__, args_dict)
+        del args_dict["self"]
         logger.debug("record_call api=%s, arguments=%s", func.__name__, args_dict)
         return func(*args, **kwargs)
+
     return inner
 
 
@@ -132,15 +135,21 @@ def needs_bind(func):
     @wraps(func)
     def inner(self, dn: str, *args, **kwargs):
         if not self.bound_dn:
-            raise ldap.INSUFFICIENT_ACCESS({
-                'msgtype': 105,
-                'msgid': 1,
-                'result': 50,
-                'desc': 'Insufficient access',
-                'ctrls': [],
-                'info': f"Insufficient '{func.__name__}' privilege for the entry '{dn}'\n"
-            })
+            raise ldap.INSUFFICIENT_ACCESS(
+                {
+                    "msgtype": 105,
+                    "msgid": 1,
+                    "result": 50,
+                    "desc": "Insufficient access",
+                    "ctrls": [],
+                    "info": (
+                        f"Insufficient '{func.__name__}' privilege for the "
+                        f"entry '{dn}'\n"
+                    ),
+                }
+            )
         return func(self, dn, *args, **kwargs)
+
     return inner
 
 
@@ -149,6 +158,7 @@ def handle_return_value(func):
     Check to see whether we have a specific return value configured for this
     call to ``func`` with these particular ``args`` and ``kwargs``.
     """
+
     @wraps(func)
     def inner(self, *args, **kwargs):
         # We're dumping the args and kwargs to a JSON string here because that
@@ -156,12 +166,15 @@ def handle_return_value(func):
         key = json.dumps([*args, *kwargs.values()], cls=BytesEncoder)
         try:
             value = self.return_value_maps[func.__name__][key]
-            logger.debug("handle_return_value.found method=%s key=%s", func.__name__, key)
+            logger.debug(
+                "handle_return_value.found method=%s key=%s", func.__name__, key
+            )
         except KeyError:
             return func(*args, **kwargs)
         if isinstance(value, Exception):
             raise value
         return value
+
     return inner
 
 
@@ -169,21 +182,23 @@ def handle_return_value(func):
 # Global LDAP object
 # =========================
 
+
 class FakeLDAP:
     """
-    We use this class to house our replacement code for these three prime ``python-ldap``
-    functions:
+    We use this class to house our replacement code for these three prime
+    ``python-ldap`` functions:
 
     * :py:func:`ldap.initialize`
     * :py:func:`ldap.set_option`
     * :py:func:`ldap.get_option`
 
-    The class takes a fully configured :py:class:`LDAPServerFactory` as an argument, and
-    will use that factory's collection of :py:class:`OptionStore` objects to construct new
-    :py:class:`FakeLDAPObject` objects.
+    The class takes a fully configured :py:class:`LDAPServerFactory` as an
+    argument, and will use that factory's collection of :py:class:`OptionStore`
+    objects to construct new :py:class:`FakeLDAPObject` objects.
 
-    As a test runs, :py:class:`FakeLDAP` keeps track of each LDAP connection made and
-    each global LDAP call made so that they can be inspected after your code has run.
+    As a test runs, :py:class:`FakeLDAP` keeps track of each LDAP connection
+    made and each global LDAP call made so that they can be inspected after your
+    code has run.
 
     Note:
         This is meant to be a disposable object, recreated for each test method.
@@ -192,37 +207,43 @@ class FakeLDAP:
 
     Args:
         server_factory: a fully configured :py:class:`LDAPServerFactory`
+
     """
 
     def __init__(self, server_factory: LDAPServerFactory) -> None:
-        self.connections: List["FakeLDAPObject"] = \
-            []  #: list of :py:class:`FakeLDAPObject` connections created in the order in which they were requested
-        self.calls: CallHistory = CallHistory()  #: The call history for global ldap function calls
-        self.options: OptionStore = OptionStore()  #: A dictionary of LDAP options set
-        self.stores: Dict[str, ObjectStore] = {}
+        #: List of :py:class:`FakeLDAPObject` connections created in the order
+        #: in which they were requested
+        self.connections: list[FakeLDAPObject] = []
+        #: Call history for global LDAP function calls
+        self.calls: CallHistory = CallHistory()
+        #: A dictionary of LDAP options set
+        self.options: OptionStore = OptionStore()
+        #: A dictionary of LDAP stores
+        self.stores: dict[str, ObjectStore] = {}
+        #: The server factory used to create LDAP connections
         self.server_factory: LDAPServerFactory = server_factory
 
     @record_call
     def initialize(
         self,
         uri: str,
-        trace_level: int = 0,
-        trace_file: TextIO = sys.stdout,
-        trace_stack_limit: int = None,
-        fileno: Any = None
-    ) -> "FakeLDAPObject":
+        trace_level: int = 0,  # noqa: ARG002
+        trace_file: TextIO = sys.stdout,  # noqa: ARG002
+        trace_stack_limit: int | None = None,  # noqa: ARG002
+        fileno: Any = None,  # noqa: ARG002
+    ) -> FakeLDAPObject:
         """
-        This is the method we use to patch :py:func:`ldap.initialize` when we
-        are testing our LDAP code.  When it is called, we will ask our
-        :py:attr:`FakeLDAP.server_factory` factory for the :py:class:`ObjectStore` most
-        appropriate for the LDAP uri ``uri``, create a :py:class:`FakeLDAPObject`
-        with a :py:func:`copy.deepcopy` of that :py:class:`ObjectStore`, and return
-        the :py:class:`FakeLDAPObject`.
+        We use this to patch :py:func:`ldap.initialize` when we are testing our
+        LDAP code. When it is called, we will ask our
+        :py:attr:`FakeLDAP.server_factory` factory for the
+        :py:class:`ObjectStore` most appropriate for the LDAP URI ``uri``,
+        create a :py:class:`FakeLDAPObject` with a :py:func:`copy.deepcopy` of
+        that :py:class:`ObjectStore`, and return the :py:class:`FakeLDAPObject`.
 
         Note:
-            Of all the arguments in our signature, we only actually use ``uri``.  The
-            other arguments are recorded in our :py:attr:`FakeLDAP.calls` call history, but
-            are otherwise ignored.
+            Of all the arguments in our signature, we only actually use ``uri``.
+            The other arguments are recorded in our :py:attr:`FakeLDAP.calls`
+            call history, but are otherwise ignored.
 
         Args:
             uri: an LDAP URI
@@ -232,10 +253,12 @@ class FakeLDAP:
             fileno: a socket or file descriptor (ignored)
 
         Raises:
-            ldap.SERVER_DOWN: could not find an appropriate :py:class:`ObjectStore` for ``uri``
+            ldap.SERVER_DOWN: could not find an appropriate
+                :py:class:`ObjectStore` for ``uri``
 
         Returns:
             A properly configured :py:class:`FakeLDAPObject`
+
         """
         if uri not in self.stores:
             self.stores[uri] = self.server_factory.get(uri)
@@ -250,7 +273,6 @@ class FakeLDAP:
         :py:attr:`FakeLDAP.options` dictionary and set its value to ``value``.
 
         Example:
-
             In your test code, you can thus test whether your code set the
             proper global LDAP option like so::
 
@@ -273,11 +295,12 @@ class FakeLDAP:
         Args:
             option: an option from python-ldap
             invalue: the value to set for the option
-        """
+
+        """  # noqa: E501
         self.options.set(option, invalue)
 
     @record_call
-    def get_option(self, option: int) -> LDAPOptionValue:
+    def get_option(self, option: int) -> LDAPOptionValue | dict[str, int | str]:
         """
         Get a global python-ldap option.  If our code hasn't set an ``option`` yet,
         return the default from ``python-ldap`` for that option.
@@ -287,6 +310,7 @@ class FakeLDAP:
 
         Returns:
             The value currently set for the option.
+
         """
         return self.options.get(option)
 
@@ -294,20 +318,20 @@ class FakeLDAP:
 
     def has_connection(self, uri: str) -> bool:
         """
-        Test to see whether an :py:func:`ldap.initialize` call was made with LDAP URI of ``uri``.
+        Test to see whether an :py:func:`ldap.initialize` call was made with
+        LDAP URI of ``uri``.
 
         Args:
             uri: The LDAP URI to look for in our connection history
 
         Returns:
-            ``True`` if at least one connection to ``uri`` was made, ``False`` otherwise.
-        """
-        for conn in self.connections:
-            if conn.uri == uri:
-                return True
-        return False
+            ``True`` if at least one connection to ``uri`` was made, ``False``
+            otherwise.
 
-    def get_connections(self, uri: str) -> List["FakeLDAPObject"]:
+        """
+        return any(conn.uri == uri for conn in self.connections)
+
+    def get_connections(self, uri: str) -> list[FakeLDAPObject]:
         """
         Return a list of :py:class:`FakeLDAPObject` connections to LDAP URI ``uri``.
 
@@ -315,16 +339,18 @@ class FakeLDAP:
             uri: The LDAP URI to look for in our connection history
 
         Returns:
-            A list of :py:class:`FakeLDAPObject` objects associated with LDAP URI ``uri``.
+            A list of :py:class:`FakeLDAPObject` objects associated with LDAP
+            URI ``uri``.
+
         """
         return [conn for conn in self.connections if conn.uri == uri]
 
-    def connection_calls(self, api_name: str = None, uri: str = None) -> CallHistory:
+    def connection_calls(
+        self, api_name: str | None = None, uri: str | None = None
+    ) -> CallHistory:
         """
         Filter our the call history for our connections by function name and
         optionally LDAP URI.
-
-        Args:
 
         Keyword Args:
             api_name: restrict through our history for calls to this function
@@ -332,10 +358,11 @@ class FakeLDAP:
 
         Returns:
             A :py:class:`CallHistory` with combined calls from the filtered connections.
+
         """
-        results: List[LDAPCallRecord] = []
+        results: list[LDAPCallRecord] = []
         for conn in self.connections:
-            if uri and not conn.uri == uri:
+            if uri and conn.uri != uri:
                 continue
             if api_name:
                 results.extend(conn.calls.filter_calls(api_name))
@@ -348,10 +375,11 @@ class FakeLDAP:
 # LDAPObject
 # =========================
 
+
 class FakeLDAPObject:
     """
-    This class simulates most of the interface of ``ldap.ldapobject.LDAPObject``
-    which is the object that gets returned when you call ``ldap.initialize()``.
+    Simulates most of the interface of ``ldap.ldapobject.LDAPObject`` which is
+    the object that gets returned when you call ``ldap.initialize()``.
 
     Note:
         This is a disposable object that should be recreated for each test, mostly
@@ -363,22 +391,27 @@ class FakeLDAPObject:
 
     Keyword Args:
         directory: a populated :py:class:`ObjectStore`
+
     """
 
     def __init__(
         self,
         uri: str,
-        store: ObjectStore = None,
+        store: ObjectStore | None = None,
     ):
         # cookie and _async_results are used for the paged search implementation
         self.current_msgid: int = 0
-        self._async_results: Dict[int, Dict[str, ldap.controls.LDAPControl]] = {}
+        self._async_results: dict[int, dict[str, ldap.controls.LDAPControl]] = {}
 
         # This is the URI to which we connected
         self.uri: str = uri  #: the LDAP URI for this connection
-        self.hostname = urlparse(self.uri).netloc  #: the host:port for this connection
+        self.hostname: str = urlparse(
+            self.uri
+        ).netloc  #: the host:port for this connection
 
-        self.options: OptionStore  = OptionStore()  #: we store data from :py:meth:`set_option` calls here
+        self.options: OptionStore = (
+            OptionStore()
+        )  #: we store data from :py:meth:`set_option` calls here
         # directory is our our prepared LDAP data objects and faked searches
         self.store: ObjectStore  #: our copy of our ObjectStore for this connection
         if store:
@@ -389,45 +422,60 @@ class FakeLDAPObject:
         # calls is our call history
         self.calls: CallHistory = CallHistory()  #: The method call history
 
-        self.tls_enabled: bool = False  #: Set to True if :py:meth:`start_tls_s` was called
-        self.bound_dn: Optional[str] = None  #: Set by :py:meth:`simple_bind_s` to the dn of the user after success
+        self.tls_enabled: bool = (
+            False  #: Set to True if :py:meth:`start_tls_s` was called
+        )
+        self.bound_dn: str | None = (
+            None  #: Set by :py:meth:`simple_bind_s` to the dn of the user after success
+        )
 
         # Other standard LDAPObject attributes that test code might look at
-        self.deref: int = ldap.DEREF_NEVER  #: Controls whether aliases are automatically dereferenced
-        self.protocol_version: int = ldap.VERSION3  #: Version of LDAP in use (always :py:attr:`ldap.VERSION3``)
-        self.sizelimit: int = ldap.NO_LIMIT  #: Limit on size of message to receive from server
-        self.network_timeout: int = ldap.NO_LIMIT  #: Limit on waiting for a network response, in seconds.
-        self.timelimit: int = ldap.NO_LIMIT  #: Limit on waiting for any response, in seconds.
-        self.timeout: int = ldap.NO_LIMIT  #: Limit on waiting for any response, in seconds.
+        self.deref: int = (
+            ldap.DEREF_NEVER
+        )  #: Controls whether aliases are automatically dereferenced
+        self.protocol_version: int = (
+            ldap.VERSION3
+        )  #: Version of LDAP in use (always :py:attr:`ldap.VERSION3``)
+        self.sizelimit: int = (
+            ldap.NO_LIMIT
+        )  #: Limit on size of message to receive from server
+        self.network_timeout: int = (
+            ldap.NO_LIMIT
+        )  #: Limit on waiting for a network response, in seconds.
+        self.timelimit: int = (
+            ldap.NO_LIMIT
+        )  #: Limit on waiting for any response, in seconds.
+        self.timeout: int = (
+            ldap.NO_LIMIT
+        )  #: Limit on waiting for any response, in seconds.
 
     # LDAPObject methods
 
     @record_call
     def set_option(self, option: int, invalue: LDAPOptionValue) -> None:
         """
-        This method sets the value of the
-        :py:class:`ldap.ldap.ldapobject.LDAPObject`` option specified by
-        ``option`` to ``invalue``.
+        Sets the value of the :py:class:`ldap.ldap.ldapobject.LDAPObject``
+        option specified by ``option`` to ``invalue``.
 
         Args:
             option: the option
-            value: the value to set the option to
+            invalue: the value to set the option to
 
         Raises:
             ValueError: ``option`` is not a valid ``python-ldap`` option
+
         """
         self.options.set(option, invalue)
 
     @record_call
-    def get_option(self, option: int) -> LDAPOptionValue:
+    def get_option(self, option: int) -> LDAPOptionValue | dict[str, int | str]:
         """
-        This method returns the value of the
-        :py:class:`ldap.ldap.ldapobject.LDAPObject`` option specified by
-        ``option``.
+        Returns the value of the :py:class:`ldap.ldap.ldapobject.LDAPObject``
+        option specified by ``option``.
 
         .. note::
-            If your code did not call :py:meth:`FakeLDAPOption.set_option` for this option,
-            we'll get ``KeyError``
+            If your code did not call :py:meth:`FakeLDAPOption.set_option` for
+            this option, we'll get ``KeyError``
 
         Args:
             option: the option
@@ -438,6 +486,7 @@ class FakeLDAPObject:
 
         Returns:
             The value of the option
+
         """
         if option == ldap.OPT_URI:
             return self.uri
@@ -448,11 +497,11 @@ class FakeLDAPObject:
     @record_call
     def simple_bind_s(
         self,
-        who: str = None,
-        cred: str = None,
-        serverctrls: List[ldap.controls.LDAPControl] = None,
-        clientctrls: List[ldap.controls.LDAPControl] = None,
-    ) -> Optional[Result3]:
+        who: str | None = None,
+        cred: str | None = None,
+        serverctrls: list[ldap.controls.LDAPControl] | None = None,  # noqa: ARG002
+        clientctrls: list[ldap.controls.LDAPControl] | None = None,  # noqa: ARG002
+    ) -> Result3 | None:
         """
         Perform a bind.  This will look in the object store for an object with dn of
         ``who`` and compare ``cred`` to the ``userPassword`` attribute for that
@@ -461,53 +510,60 @@ class FakeLDAPObject:
         Keyword Args:
             who: the dn of the user with which to bind
             cred:  the password for that user
+            serverctrls: server controls (ignored)
+            clientctrls: client controls (ignored)
 
         Raises:
             ldap.INVALID_CREDENTIALS: the ``who`` did not match the ``cred``
+
         """
-        if (who is None and cred is None):
+        if who is None and cred is None:
             return None
-        who = cast(str, who)
-        cred = cast(str, cred)
-        if self.store.exists(who, validate=False) and self.compare_s(who.lower(), 'userPassword', cred.encode('utf-8')):
+        who = cast("str", who)
+        cred = cast("str", cred)
+        if self.store.exists(who, validate=False) and self.compare_s(
+            who.lower(), "userPassword", cred.encode("utf-8")
+        ):
             self.bound_dn = who
             return (ldap.RES_BIND, [], 3, [])
-        raise ldap.INVALID_CREDENTIALS({
-            'msgtype': 97,
-            'msgid': 2,
-            'result': 49,
-            'desc': 'Invalid credentials',
-            'ctrls': []
-        })
+        raise ldap.INVALID_CREDENTIALS(
+            {
+                "msgtype": 97,
+                "msgid": 2,
+                "result": 49,
+                "desc": "Invalid credentials",
+                "ctrls": [],
+            }
+        )
 
     @record_call
     def whoami_s(self) -> str:
         """
-        This synchronous method implements the LDAP “Who Am I?” extended
-        operation.
+        Implements the LDAP "Who Am I?" extended operation.
 
         It is useful for finding out to find out which identity is assumed by
         the LDAP server after a bind.
 
         Returns:
             Empty string if we haven't bound as an identity, otherwise "dn: {the dn}"
+
         """
         if self.bound_dn:
-            return f'dn: {self.bound_dn}'
-        return ''
+            return f"dn: {self.bound_dn}"
+        return ""
 
     @record_call
     def search_ext(
         self,
         base: str,
         scope: int,
-        filterstr: str = '(objectClass=*)',
-        attrlist: List[str] = None,
+        filterstr: str = "(objectClass=*)",
+        attrlist: list[str] | None = None,
         attrsonly: int = 0,
-        serverctrls: List[ldap.controls.LDAPControl] = None,
-        clientctrls: List[ldap.controls.LDAPControl] = None,
-        timeout: int = -1,
-        sizelimit: int = 0
+        serverctrls: list[ldap.controls.LDAPControl] | None = None,
+        clientctrls: list[ldap.controls.LDAPControl] | None = None,  # noqa: ARG002
+        timeout: int = -1,  # noqa: ARG002
+        sizelimit: int = 0,
     ) -> int:
         """
         Performs a search.
@@ -674,8 +730,8 @@ class FakeLDAPObject:
     def result3(
         self,
         msgid: int = ldap.RES_ANY,
-        all: int = 1,  # pylint: disable=redefined-builtin
-        timeout: int = None
+        all: int = 1,  # noqa: A002, ARG002
+        timeout: int | None = None,  # noqa: ARG002
     ) -> Result3:
         """
         Retrieve the results of our :py:meth:`FakeLDAPObject.search_ext` call.
@@ -684,33 +740,39 @@ class FakeLDAPObject:
             The ``all`` and ``timeout`` keyword arguments are ignored here.
 
         Keyword Args:
-            msgid: the ``msgid`` returned by the :py:meth:`FakeLDAPObject.search_ext` call
-            all: if 1, return all results at once; if 0, return them one at a time (ignored)
+            msgid: the ``msgid`` returned by the
+                :py:meth:`FakeLDAPObject.search_ext` call
+            all: if 1, return all results at once; if 0, return them one at a
+                time (ignored)
+            timeout: timeout for the search (ignored)
 
         Returns:
             A :py:func:`ldap.result3` 4-tuple.
+
         """
         if self._async_results:
             if msgid == ldap.RES_ANY:
-                msgid = list(self._async_results.keys())[0]
+                msgid = next(iter(self._async_results.keys()))
         if msgid in self._async_results:
-            data = self._async_results[msgid]['data']
-            controls = self._async_results[msgid]['ctrls']
+            data = self._async_results[msgid]["data"]
+            controls = self._async_results[msgid]["ctrls"]
             del self._async_results[msgid]
         else:
             data = []
-        controls[0].cookie = None
-        return ldap.RES_SEARCH_RESULT, data, msgid, controls
+            controls = None
+        if controls is not None and len(controls) > 0:
+            controls[0].cookie = None
+        return ldap.RES_SEARCH_RESULT, data, msgid, controls  # type: ignore[return-value]
 
     @record_call
     def search_s(
         self,
         base: str,
         scope: int,
-        filterstr: str = '(objectClass=*)',
-        attrlist: List[str] = None,
-        attrsonly: int = 0
-    ) -> List[LDAPRecord]:
+        filterstr: str = "(objectClass=*)",
+        attrlist: list[str] | None = None,
+        attrsonly: int = 0,
+    ) -> list[LDAPRecord]:
         return self._search_s(base, scope, filterstr, attrlist, attrsonly)
 
     @record_call
@@ -723,17 +785,20 @@ class FakeLDAPObject:
         Raises:
             ldap.LOCAL_ERROR: :py:meth:`start_tls_s` was done twice on the same
                 connection
+
         """
         if not self.tls_enabled:
             self.tls_enabled = True
         else:
             raise ldap.LOCAL_ERROR(
                 {
-                    'result': -2,
-                    'desc': 'Local error',
-                    'errno': 35,
-                    'ctrls': [],
-                    'info': 'Start TLS request accepted.Server willing to negotiate SSL.'
+                    "result": -2,
+                    "desc": "Local error",
+                    "errno": 35,
+                    "ctrls": [],
+                    "info": (
+                        "Start TLS request accepted.Server willing to negotiate SSL.",
+                    ),
                 }
             )
 
@@ -754,9 +819,11 @@ class FakeLDAPObject:
 
         Returns:
             ``True`` if the values are equal, ``False`` otherwise.
+
         """
         if not isinstance(value, bytes):
-            raise TypeError(f"a bytes-like object is required, not '{type(value)}'")
+            msg = f"a bytes-like object is required, not '{type(value)}'"
+            raise TypeError(msg)
         try:
             return value in self.store.get(dn)[attr]
         except KeyError:
@@ -769,7 +836,7 @@ class FakeLDAPObject:
         Modify the object with dn of ``dn`` using the modlist ``modlist``.
 
         Each element in the list modlist should be a tuple of the form
-        ``(mod_op: int, mod_type: str, mod_vals: Union[bytes, List[bytes]])``, where
+        ``(mod_op: int, mod_type: str, mod_vals: bytes | List[bytes])``, where
         ``mod_op`` indicates the operation (one of :py:attr:`ldap.MOD_ADD`,
         :py:attr:`ldap.MOD_DELETE`, or :py:attr:`ldap.MOD_REPLACE`, ``mod_type``
         is a string indicating the attribute type name, and ``mod_vals`` is
@@ -800,12 +867,14 @@ class FakeLDAPObject:
 
         Raises:
             ldap.NO_SUCH_OBJECT: no object with dn of ``dn`` exists in our object store
-            ldap.TYPE_OR_VALUE_EXISTS: you tried to add an value to an attribute, but it was
-                already in the value list
-            ldap.INSUFFICIENT_ACCESS: you need to do a non-anonymous bind before doing this
+            ldap.TYPE_OR_VALUE_EXISTS: you tried to add an value to an
+                attribute, but it was already in the value list
+            ldap.INSUFFICIENT_ACCESS: you need to do a non-anonymous bind before
+                doing this
 
         Returns:
             A :py:func:`ldap.result3` type 4-tuple.
+
         """
         self.store.update(dn, modlist, bind_dn=self.bound_dn)
         return (ldap.RES_MODIFY, [], 3, [])
@@ -828,7 +897,9 @@ class FakeLDAPObject:
 
         Raises:
             ldap.NO_SUCH_OBJECT: no object with dn of ``dn`` exists in our object store
-            ldap.INSUFFICIENT_ACCESS: you need to do a non-anonymous bind before doing this
+            ldap.INSUFFICIENT_ACCESS: you need to do a non-anonymous bind before
+                doing this
+
         """
         self.store.delete(dn)
 
@@ -862,8 +933,11 @@ class FakeLDAPObject:
             modlist: the add modlist
 
         Raises:
-            ldap.ALREADY_EXISTS: an object with dn of ``dn`` already exists in our object store
-            ldap.INSUFFICIENT_ACCESS: you need to do a non-anonymous bind before doing this
+            ldap.ALREADY_EXISTS: an object with dn of ``dn`` already exists in
+                our object store
+            ldap.INSUFFICIENT_ACCESS: you need to do a non-anonymous bind before
+                doing this
+
         """
         self.store.create(dn, modlist, bind_dn=self.bound_dn)
 
@@ -873,10 +947,10 @@ class FakeLDAPObject:
         self,
         dn: str,
         newrdn: str,
-        newsuperior: str = None,
+        newsuperior: str | None = None,
         delold: int = 1,
-        serverctrls: List[ldap.controls.LDAPControl] = None,
-        clientctrls: List[ldap.controls.LDAPControl] = None,
+        serverctrls: list[ldap.controls.LDAPControl] | None = None,  # noqa: ARG002
+        clientctrls: list[ldap.controls.LDAPControl] | None = None,  # noqa: ARG002
     ) -> None:
         """
         Take ``dn`` (the DN of the entry whose RDN is to be changed, and
@@ -891,19 +965,24 @@ class FakeLDAPObject:
         Keyword Args:
             newsuperior: the new basedn
             delold: if 1, delete the old entry after renaming, if 0, don't.
+            serverctrls: server controls (ignored)
+            clientctrls: client controls (ignored)
 
         Raises:
             ldap.NO_SUCH_OBJECT: no object with dn of ``dn`` exists in our object store
-            ldap.INSUFFICIENT_ACCESS: you need to do a non-anonymous bind before doing this
+            ldap.INSUFFICIENT_ACCESS: you need to do a non-anonymous bind before
+                doing this
+
         """
         entry = self.store.copy(dn)
-        if not newsuperior:
-            basedn = ','.join(dn.split(',')[1:])
-        else:
-            basedn = newsuperior
-        newdn = newrdn + ',' + basedn
-        attr, value = newrdn.split('=')
-        entry[attr] = [value.encode('utf-8')]
+        basedn = newsuperior if newsuperior else ",".join(dn.split(",")[1:])
+        newdn = newrdn + "," + basedn
+        attr, value = newrdn.split("=")
+        entry[attr] = [value.encode("utf-8")]
+        self.store.set(newdn, entry, bind_dn=self.bound_dn)
+        if delold and dn != newrdn:
+            self.store.delete(dn, bind_dn=self.bound_dn)
+
     @needs_bind
     @record_call
     def modrdn_s(
@@ -964,14 +1043,25 @@ class FakeLDAPObject:
         self,
         base: str,
         scope: int,
-        filterstr: str = '(objectClass=*)',
-        attrlist: List[str] = None,
-        attrsonly: int = 0
-    ) -> List[LDAPRecord]:
+        filterstr: str = "(objectClass=*)",
+        attrlist: list[str] | None = None,
+        attrsonly: int = 0,  # noqa: ARG002
+    ) -> list[LDAPRecord]:
         """
         We can do a SCOPE_BASE search with the default filter and simple
         SCOPE_ONELEVEL with query of the form (attribute_name=some_value).
         Beyond that, you're on your own.
+
+        Args:
+            base: the base DN for the search
+            scope: the scope of the search
+
+        Keyword Args:
+            filterstr: the filter to use for the search
+            attrlist: the list of attributes to return for each object
+            attrsonly: if 1, return only the attribute values; if 0, return the
+                entire object
+
         """
         if scope == ldap.SCOPE_BASE:
             return self.store.search_base(base, filterstr, attrlist=attrlist)

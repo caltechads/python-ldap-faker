@@ -1,14 +1,15 @@
 from __future__ import annotations
 
-from copy import deepcopy
-from dataclasses import dataclass
 import json
 import re
-from typing import List, Dict, Any, Optional, Set, cast
 import warnings
+from copy import deepcopy
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any, cast
 
 import ldap
-from ldap_filter import Filter
+from ldap_filter import Filter  # type: ignore[reportUnknownVariableType]
 from ldap_filter.parser import ParseError
 
 from .hooks import hooks
@@ -22,15 +23,15 @@ from .types import (
     LDAPOptionValue,
     LDAPRecord,
     LDAPSearchResult,
+    ModList,
     RawLDAPObjectStore,
-    ModList
 )
 
 
 @dataclass
 class LDAPCallRecord:
     """
-    This is a single LDAP call record, used by :py:class:`CallHistory` to store
+    A single LDAP call record, used by :py:class:`CallHistory` to store
     information about calls to LDAP api functions.
 
     :py:attr:`api_name` is the name of the LDAP api call made
@@ -42,7 +43,6 @@ class LDAPCallRecord:
     default) value for that argument.
 
     Example:
-
         If we make this call to a patched :py:class:`FakeLDAPObject`::
 
             ldap_obj.search_s('ou=bar,o=baz,c=country', ldap.SCOPE_SUBTREE, '(uid=foo)')
@@ -61,13 +61,14 @@ class LDAPCallRecord:
             )
 
     """
+
     api_name: str  #: the name LDAP api call
-    args: Dict[str, Any]   #: the args and kwargs dict
+    args: dict[str, Any]  #: the args and kwargs dict
 
 
 class LDAPServerFactory:
     """
-    This class registers :py:class:`ObjectStore` objects to be used by
+    Registers :py:class:`ObjectStore` objects to be used by
     ``FakeLDAP.initialize()`` in constructing :py:class:`FakeLDAPObject` objects.
     :py:class:`ObjectStore` objects are named registered here by LDAP uri (in reality,
     any string).
@@ -80,7 +81,6 @@ class LDAPServerFactory:
       in your code.
 
     Example:
-
         To register a default :py:class:`ObjectStore` that will be used for every
         ``uri`` passed to :py:meth:`FakeLDAP.initialize`:
 
@@ -92,9 +92,10 @@ class LDAPServerFactory:
         >>> fake_ldap = FakeLDAP(factory)
 
         Now any time your code does an ``ldap.initialize()`` to our patched
-        version of that function, it will get a a :py:class:`FakeLDAPObject` configured
-        with a :py:func:`copy.deepcopy` of the :py:class:`ObjectStore` ``store``, no matter what
-        ``uri`` it passes to ``ldap.initialize()``.
+        version of that function, it will get a a :py:class:`FakeLDAPObject`
+        configured with a :py:func:`copy.deepcopy` of the
+        :py:class:`ObjectStore` ``store``, no matter what ``uri`` it passes to
+        ``ldap.initialize()``.
 
         To register a different ``ObjectStores`` that will be used for specific
         ``uris``:
@@ -110,21 +111,25 @@ class LDAPServerFactory:
         >>> fake_ldap = FakeLDAP(factory)
 
         Now if your code does ``ldap.initialize('ldap://server1')``, it will get
-        a :py:class:`FakeLDAPObject` configured with a :py:func:`copy.deepcopy` of the
-        :py:class:`ObjectStore` object ``store1``, while if it does
-        ``ldap.initialize('ldap://server2' )``, it will get a :py:class:`FakeLDAPObject`
-        configured with a :py:func:`copy.deepcopy` of the :py:class:`ObjectStore` object ``store2``.
+        a :py:class:`FakeLDAPObject` configured with a :py:func:`copy.deepcopy`
+        of the :py:class:`ObjectStore` object ``store1``, while if it does
+        ``ldap.initialize('ldap://server2' )``, it will get a
+        :py:class:`FakeLDAPObject` configured with a :py:func:`copy.deepcopy` of
+        the :py:class:`ObjectStore` object ``store2``.
+
     """
 
     def __init__(self) -> None:
-        self.servers: Dict[str, "ObjectStore"] = {}
-        self.default: Optional["ObjectStore"] = None
+        self.servers: dict[str, ObjectStore] = {}
+        self.default: ObjectStore | None = None
 
-    def load_from_file(self, filename: str, uri: str = None, tags: List[str] = None) -> None:
+    def load_from_file(
+        self, filename: str, uri: str | None = None, tags: list[str] | None = None
+    ) -> None:
         """
-        Given a file path to a JSON file with the objects for an :py:class:`ObjectStore`,
-        create a new :py:class:`ObjectStore`, load it with that JSON File and register it
-        with uri of ``uri``.
+        Given a file path to a JSON file with the objects for an
+        :py:class:`ObjectStore`, create a new :py:class:`ObjectStore`, load it
+        with that JSON File and register it with uri of ``uri``.
 
         Args:
             filename: the full path to our JSON file
@@ -138,6 +143,7 @@ class LDAPServerFactory:
                 register the :py:class:`ObjectStore` with a specific ``uri``
             RuntimeWarning: raised if we try to overwrite an already registered object
                 store with our new one
+
         """
         if not tags:
             tags = []
@@ -145,10 +151,10 @@ class LDAPServerFactory:
         store.load_objects(filename)
         self.register(store, uri=uri)
 
-    def register(self, store: "ObjectStore", uri: str = None) -> None:
+    def register(self, store: ObjectStore, uri: str | None = None) -> None:
         """
-        Register a new :py:class:`ObjectStore` to be used as our fake LDAP server for when
-        we run our  fake ``initialize`` function.
+        Register a new :py:class:`ObjectStore` to be used as our fake LDAP
+        server for when we run our  fake ``initialize`` function.
 
         Args:
             store: a configured :py:class:`ObjectStore`
@@ -161,29 +167,34 @@ class LDAPServerFactory:
                 register an :py:class:`ObjectStore` with a specific ``uri``
             RuntimeWarning: raised if we try to overwrite an already registered object
                 store with a new one
+
         """
         if uri and self.default is not None:
-            raise ValueError(
+            msg = (
                 f'You cannot regster an ObjectStore for uri="{uri}" because '
-                'a default server has already been set'
+                "a default server has already been set"
             )
+            raise ValueError(msg)
         if not uri:
             if self.default is not None:
                 warnings.warn(
-                    'LDAPServerFactory: overriding existing default ObjectStore',
-                    RuntimeWarning
+                    "LDAPServerFactory: overriding existing default ObjectStore",
+                    RuntimeWarning,
+                    stacklevel=2,
                 )
             self.default = store
         if uri in self.servers:
             warnings.warn(
-                f'LDAPServerFactory: overriding existing ObjectStore for uri={uri}',
-                RuntimeWarning
+                f"LDAPServerFactory: overriding existing ObjectStore for uri={uri}",
+                RuntimeWarning,
+                stacklevel=2,
             )
-        self.servers[cast(str, uri)] = store
+        self.servers[cast("str", uri)] = store
 
-    def get(self, uri: str) -> "ObjectStore":
+    def get(self, uri: str) -> ObjectStore:
         """
-        Return a :py:func:`copy.deepcopy` of the :py:class:`ObjectStore` identified by ``uri``.
+        Return a :py:func:`copy.deepcopy` of the :py:class:`ObjectStore`
+        identified by ``uri``.
 
         Args:
             uri: use this uri to look up which :py:class:`ObjectStore` to use
@@ -193,18 +204,19 @@ class LDAPServerFactory:
 
         Returns:
             A :py:func:`copy.deepcopy` of the :py:class:`ObjectStore`
+
         """
         if self.default is not None:
             return deepcopy(self.default)
         try:
             return deepcopy(self.servers[uri])
         except KeyError as exc:
-            raise ldap.SERVER_DOWN({'desc': "Can't contact LDAP Server"}) from exc
+            raise ldap.SERVER_DOWN({"desc": "Can't contact LDAP Server"}) from exc  # type: ignore[attr-defined]
 
 
 class CallHistory:
     """
-    This class records the ``python-ldap`` call history for a particular
+    Records the ``python-ldap`` call history for a particular
     :py:class:`FakeLDAPObject` as :py:class:`LDAPCallRecord` objects.  It works
     in conjunction with the ``@record_call`` decorator.  An
     :py:class:`CallHistory` object will be configured on each
@@ -216,26 +228,27 @@ class CallHistory:
     with the arguments we expected.
     """
 
-    def __init__(self, calls: List[LDAPCallRecord] = None):
-        self._calls: List[LDAPCallRecord] = []
+    def __init__(self, calls: list[LDAPCallRecord] | None = None):
+        self._calls: list[LDAPCallRecord] = []
         if calls:
             self._calls = calls
 
-    def register(self, api_name: str, arguments: Dict[str, Any]) -> None:
+    def register(self, api_name: str, arguments: dict[str, Any]) -> None:
         """
         Register a new call record.  This is used by the ``@record_call``
         decorator to register :py:class:`FakeLDAPObject` method calls.
 
         Args:
             api_name: the name of the function or method called
-            arguments: a dict where the keys are argument names, and the values are passed in
-                values for those arguments
+            arguments: a dict where the keys are argument names, and the values
+                are passed in values for those arguments
 
         :meta private:
+
         """
         self._calls.append(LDAPCallRecord(api_name, arguments))
 
-    def filter_calls(self, api_name: str) -> List[LDAPCallRecord]:
+    def filter_calls(self, api_name: str) -> list[LDAPCallRecord]:
         """
         Filter our call history by function name.
 
@@ -245,18 +258,18 @@ class CallHistory:
         Returns:
             A list of (``api_name``, ``arguments``) tuples in the order in which the
             calls were made.  Arguments is a ``Dict[str, Any]``.
+
         """
         return [call for call in self._calls if call.api_name == api_name]
 
     @property
-    def calls(self) -> List[LDAPCallRecord]:
+    def calls(self) -> list[LDAPCallRecord]:
         """
-        This property returns the list of all calls made against the parent object.
+        Returns the list of all calls made against the parent object.
 
         Example:
-
-            To test that your code did a :py:func:`ldap.simple_bind_s` call with the usernam
-            and password you expected, you could do::
+            To test that your code did a :py:func:`ldap.simple_bind_s` call with
+            the usernam and password you expected, you could do::
 
                 from unittest import TestCase
                 import ldap
@@ -282,17 +295,17 @@ class CallHistory:
             Returns a list of 2-tuples, one for each method call made since
             the last reset. Each tuple contains the name of the API and a dictionary
             of arguments. Argument defaults are included.
-        """
+
+        """  # noqa: E501
         return self._calls
 
     @property
-    def names(self) -> List[str]:
+    def names(self) -> list[str]:
         """
         Returns the list names of ``python-ldap`` functions or methods called, in
         the order they were called.  You can use this to test whether an particulary
 
         Example:
-
             To test that your code did at least one :py:func:`ldap.add_s` call, you
             could do::
 
@@ -315,6 +328,7 @@ class CallHistory:
 
         Returns:
             A list of method names, in the order they were called.
+
         """
         return [call.api_name for call in self._calls]
 
@@ -324,7 +338,7 @@ class OptionStore:
     We use this to store options set via ``set_option``.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.options: LDAPOptionStore = {}
 
     def set(self, option: int, invalue: LDAPOptionValue) -> None:
@@ -333,18 +347,21 @@ class OptionStore:
 
         Args:
             option: the code for the option (e.g. :py:data:`ldap.OPT_X_TLS_NEWCTX`)
-            value: the value we want the option to be set to
+            invalue: the value we want the option to be set to
 
         Raises:
             ValueError: ``option`` is not a valid ``python-ldap`` option
+
         """
-        if option not in ldap.OPT_NAMES_DICT:
-            raise ValueError(f'unknown option {option}')
+        if option not in ldap.OPT_NAMES_DICT:  # type: ignore[reportUnknownVariableType]
+            msg = f"unknown option {option}"
+            raise ValueError(msg)
         self.options[option] = invalue
 
-    def get(self, option: int) -> LDAPOptionValue:
+    def get(self, option: int) -> LDAPOptionValue | dict[str, int | str]:
         """
-        Get the value for a previosly set option that was set via :py:meth:`OptionStore.set`.
+        Get the value for a previosly set option that was set via
+        :py:meth:`OptionStore.set`.
 
         Args:
             option: the code for the option (e.g. :py:data:`ldap.OPT_X_TLS_NEWCTX`)
@@ -354,50 +371,61 @@ class OptionStore:
 
         Returns:
             The value for the option, or the default.
+
         """
-        if option not in ldap.OPT_NAMES_DICT:
-            raise ValueError(f'unknown option {option}')
-        if option in (ldap.OPT_API_INFO, ldap.OPT_SUCCESS):
-            # Even though we declare the output as "int | str", openldap at least returns
-            # a dict for this
-            return {  # type: ignore
-                'info_version': 1,
-                'api_version': 3001,
-                'vendor_name': 'python-ldap-faker',
-                'vendor_version': '1.0.0'
+        if option not in ldap.OPT_NAMES_DICT:  # type: ignore[reportUnknownVariableType]
+            msg = f"unknown option {option}"
+            raise ValueError(msg)
+        if option in (ldap.OPT_API_INFO, ldap.OPT_SUCCESS):  # type: ignore[attr-defined]
+            # Even though we declare the output as "int | str", openldap at
+            # least returns a dict for this
+            return {
+                "info_version": 1,
+                "api_version": 3001,
+                "vendor_name": "python-ldap-faker",
+                "vendor_version": "1.0.0",
             }
-        if option == ldap.OPT_PROTOCOL_VERSION:
+        if option == ldap.OPT_PROTOCOL_VERSION:  # type: ignore[attr-defined]
             return 3
         return self.options[option]
 
 
 class ObjectStore:
     """
-    This class represents our actual simulated LDAP object store.  Copies of this
+    Represents our actual simulated LDAP object store.  Copies of this
     will be used to configure :py:class:`FakeLDAPObject` objects.
     """
 
-    _QUERY_RE = re.compile(r"\(\w+=.+\)$")
-    _DEFAULT_SEARCH_RE = re.compile(r"^\(objectclass=*\)$", re.I)
+    _QUERY_RE: re.Pattern[str] = re.compile(r"\(\w+=.+\)$")
+    _DEFAULT_SEARCH_RE: re.Pattern[str] = re.compile(
+        r"^\(objectclass=*\)$", re.IGNORECASE
+    )
 
-    def __init__(self, tags: List[str] = None):
+    def __init__(self, tags: list[str] | None = None):
         # raw_objects preserves the object attribute case as it was given to us
         # by register_object, and retains the values as List[bytes]
-        self.raw_objects: RawLDAPObjectStore = \
-            RawLDAPObjectStore()  #: LDAP records as they would have been returned by ``python-ldap```
+        self.raw_objects: RawLDAPObjectStore = (
+            RawLDAPObjectStore()
+        )  #: LDAP records as they would have been returned by ``python-ldap```
         # objects has the same data as raw_objects, but here we forces the
         # attribute names on each object to be case insensitive, and we convert
         # values to List[str].  We need that because in LDAP searches, attribute
         # names and values are compared as case-insensitive, and Filter.match()
         # expects the filter and values to be strings
-        self.objects: LDAPObjectStore = LDAPObjectStore()  #: LDAP records set up to make searching better
-        self.tags: List[str] = tags if tags is not None else []  #: used when filtering hooks to apply
-        self.controls: Dict[str, Any] = {}  #: can be used by hooks to store state
-        self.operational_attributes: Set[str] = set()  #: list of attributes that have to be specifically requested
-        for hook_func in hooks.get('post_objectstore_init', self.tags):
+        self.objects: LDAPObjectStore = (
+            LDAPObjectStore()
+        )  #: LDAP records set up to make searching better
+        self.tags: list[str] = (
+            tags if tags is not None else []
+        )  #: used when filtering hooks to apply
+        self.controls: dict[str, Any] = {}  #: can be used by hooks to store state
+        self.operational_attributes: set[str] = (
+            set()
+        )  #: list of attributes that have to be specifically requested
+        for hook_func in hooks.get("post_objectstore_init", self.tags):  # type: ignore[reportUnknownVariableType]
             hook_func(self)
 
-    def convert_LDAPData(self, data: LDAPData) -> CILDAPData:
+    def convert_LDAPData(self, data: LDAPData) -> CILDAPData:  # noqa: N802
         """
         Convert an incoming ``LDAPData` dict (``Dict[str, List[bytes]``])
         to a ``CILDAPData`` dict (``CaseInsensitiveDict[str, List[str]])``)
@@ -411,12 +439,13 @@ class ObjectStore:
 
         Returns:
             The convered CILDAPData dict.
+
         """
         # We need self.objects to be a case insensitive Dict[str, List[str]]
         # so that filtering works like it would in a real ldap serverindee
-        d: Dict[str, Any] = deepcopy(data)
+        d: dict[str, Any] = deepcopy(data)
         for key, value in d.items():
-            d[key] = [v.decode('utf8') for v in value]
+            d[key] = [v.decode("utf8") for v in value]
         return CILDAPData(d)
 
     ## Object store construction
@@ -430,11 +459,11 @@ class ObjectStore:
         Note:
             One caveat with this method vs.
             :py:meth:`ObjectStore.register_objects` is that the records returned
-            by ``python-ldap`` are of type ``Tuple[str, Dict[str,
-            List[bytes]]]`` but JSON has no concept of ``bytes`` or ``tuple``.
+            by ``python-ldap`` are of type ``tuple[str, dict[str,
+            list[bytes]]]`` but JSON has no concept of ``bytes`` or ``tuple``.
             Thus we will expect the LDAP records in the file to have type
-            ``List[str, Dict[str, List[str]]]`` and we will convert them to
-            ``Tuple[str, Dict[str, List[bytes]]]`` before saving to
+            ``list[str, dict[str, list[str]]]`` and we will convert them to
+            ``tuple[str, dict[str, list[bytes]]]`` before saving to
             :py:attr:`raw_objects`
 
         Args:
@@ -444,21 +473,22 @@ class ObjectStore:
             ldap.ALREADY_EXISTS: there is already an object in our object store
                 with this dn
             ldap.INVALID_DN_SYNTAX: one of the object DNs is not well formed
+
         """
-        for hook_func in hooks.get('pre_load_objects', self.tags):
+        for hook_func in hooks.get("pre_load_objects", self.tags):
             hook_func(self, filename)
-        with open(filename, 'r', encoding='utf-8') as fd:
+        with Path(filename).open(encoding="utf-8") as fd:
             objects = json.load(fd)
         for obj in objects:
             dn, data = obj
             new_data: LDAPData = {}
             for attr, value in data.items():
-                new_data[attr] = [entry.encode('utf-8') for entry in value]
+                new_data[attr] = [entry.encode("utf-8") for entry in value]
             self.register_object((dn, new_data))
-        for hook_func in hooks.get('post_load_objects', self.tags):
+        for hook_func in hooks.get("post_load_objects", self.tags):
             hook_func(self)
 
-    def register_objects(self, objs: List[LDAPRecord]) -> None:
+    def register_objects(self, objs: list[LDAPRecord]) -> None:
         """
         Load a list of LDAP records into our  internal database.  Use this when
         setting up the data you will use to run your tests.  Each record in the
@@ -511,13 +541,15 @@ class ObjectStore:
             ldap.ALREADY_EXISTS: there is already an object in our object store
                 with this dn
             ldap.INVALID_DN_SYNTAX: one of the object DNs is not well formed
-            TypeError: the LDAPData portion for an object was not of type ``Dict[str, List[bytes]]``
+            TypeError: the LDAPData portion for an object was not of type
+            ``Dict[str, List[bytes]]``
+
         """
-        for hook_func in hooks.get('pre_register_objects', self.tags):
+        for hook_func in hooks.get("pre_register_objects", self.tags):
             hook_func(self, objs)
         for obj in objs:
             self.register_object(obj)
-        for hook_func in hooks.get('post_register_objects', self.tags):
+        for hook_func in hooks.get("post_register_objects", self.tags):
             hook_func(self)
 
     def register_object(self, obj: LDAPRecord) -> None:
@@ -558,14 +590,15 @@ class ObjectStore:
             ldap.ALREADY_EXISTS: there is already an object in our object store
                 with this dn
             ldap.INVALID_DN_SYNTAX: the DN is not well formed
-            TypeError: the LDAPData portion was not of type ``Dict[str, List[bytes]]``
+            TypeError: the LDAPData portion was not of type ``dict[str, list[bytes]]``
+
         """
-        for hook_func in hooks.get('pre_register_object', self.tags):
+        for hook_func in hooks.get("pre_register_object", self.tags):
             hook_func(self, obj)
         if self.exists(obj[0]):
-            raise ldap.ALREADY_EXISTS
+            raise ldap.ALREADY_EXISTS({"desc": "Object already exists"})  # type: ignore[attr-defined]
         self.set(obj[0], obj[1])
-        for hook_func in hooks.get('post_register_object', self.tags):
+        for hook_func in hooks.get("post_register_object", self.tags):
             hook_func(self, obj)
 
     # Helpers
@@ -580,10 +613,9 @@ class ObjectStore:
         Returns:
             Returns ``True`` if ``filterstr`` is the default filter string
             case-insensitive, ``False`` otherwise.
+
         """
-        if self._DEFAULT_SEARCH_RE.search(filterstr):
-            return True
-        return False
+        return bool(self._DEFAULT_SEARCH_RE.search(filterstr))
 
     def __check_bytes(self, value: Any) -> None:
         """
@@ -594,12 +626,16 @@ class ObjectStore:
 
         Raises:
             TypeError: ``value`` is not a ``List[bytes]``
+
         """
         for v in value:
             if not isinstance(v, bytes):
-                raise TypeError(f"('Tuple_to_LDAPMod(): expected a byte string in the list', '{v}')")
+                msg = (
+                    f"('Tuple_to_LDAPMod(): expected a byte string in the list', '{v}')"
+                )
+                raise TypeError(msg)
 
-    def __validate_dn(self, dn: str, operation: int = ldap.RES_ANY) -> None:
+    def __validate_dn(self, dn: str, operation: int = ldap.RES_ANY) -> None:  # type: ignore[attr-defined]
         """
         Validate that ``dn`` is a well formed DN.
 
@@ -611,47 +647,55 @@ class ObjectStore:
 
         Raises:
             ldap.INVALID_DN_SYNTAX: the dn was not well-formed
-        """
-        if not ldap.dn.is_dn(dn):
-            raise ldap.INVALID_DN_SYNTAX({
-                'msgtype': operation,
-                'msgid': 3,
-                'result': 34,
-                'desc': 'Invalid DN syntax',
-                'ctrls': [],
-                'info': 'DN value invalid per syntax\n'
-            })
 
-    def __validate_LDAPRecord(self, obj: LDAPRecord) -> None:
+        """
+        if not ldap.dn.is_dn(dn):  # type: ignore[attr-defined]
+            raise ldap.INVALID_DN_SYNTAX(  # type: ignore[attr-defined]
+                {
+                    "msgtype": operation,
+                    "msgid": 3,
+                    "result": 34,
+                    "desc": "Invalid DN syntax",
+                    "ctrls": [],
+                    "info": "DN value invalid per syntax\n",
+                }
+            )
+
+    def __validate_LDAPRecord(self, obj: LDAPRecord) -> None:  # noqa: N802
         dn, data = obj
         self.__validate_dn(dn)
         for attr, value in data.items():
             if not isinstance(attr, str):
-                raise TypeError(f"attributes must be of type str: '{attr!r}'")
+                msg = f"attributes must be of type str: '{attr!r}'"
+                raise TypeError(msg)
             if not isinstance(value, list):
-                raise TypeError(f"values nust be of type List[bytes]: '{value!r}'")
+                msg = f"values nust be of type List[bytes]: '{value!r}'"
+                raise TypeError(msg)
             for v in value:
                 if not isinstance(v, bytes):
-                    raise TypeError(f"values nust be of type List[bytes]: '{v!r}'")
+                    msg = f"values nust be of type List[bytes]: '{v!r}'"
+                    raise TypeError(msg)
 
-    def __parse_filterstr(self, filterstr: str) -> Filter:
+    def __parse_filterstr(self, filterstr: str) -> Any:
         try:
             filt = Filter.parse(filterstr)
         except ParseError as exc:
-            raise ldap.FILTER_ERROR({
-                'result': -7,
-                'desc': 'Bad search filter',
-                'errno': 35,
-                'ctrls': [],
-                'info': 'Resource temporarily unavailable'
-            }) from exc
+            raise ldap.FILTER_ERROR(  # type: ignore[attr-defined]
+                {
+                    "result": -7,
+                    "desc": "Bad search filter",
+                    "errno": 35,
+                    "ctrls": [],
+                    "info": "Resource temporarily unavailable",
+                }
+            ) from exc
         return filt
 
     def __filter_attributes(
         self,
         obj: LDAPData,
-        attrlist: List[str] = None,
-        include_operational_attributes: bool = False
+        attrlist: list[str] | None = None,
+        include_operational_attributes: bool = False,
     ) -> LDAPData:
         """
         Return just the attributes on ``obj`` named in ``attrlist``.   If
@@ -679,20 +723,25 @@ class ObjectStore:
             A filtered version of ``obj`` with only the attributes named in
             ``attrlist``, omitting the operational attributes unless specifically
             requested.
+
         """
         if not attrlist:
-            attrlist = ['*']
+            attrlist = ["*"]
         obj_attrs = set()
-        if attrlist and '*' in attrlist:
+        if attrlist and "*" in attrlist:
             obj_attrs = set(obj.keys())
             if not include_operational_attributes:
                 obj_attrs -= self.operational_attributes
         if attrlist:
-            obj_attrs.update({attr for attr in attrlist if attr != '*'})
+            obj_attrs.update({attr for attr in attrlist if attr != "*"})
         _obj_attrs: Attrlist = Attrlist()
         for attr in obj_attrs:
             _obj_attrs[attr] = attr
-        return {_obj_attrs[attr]: deepcopy(value) for attr, value in obj.items() if attr in _obj_attrs}
+        return {
+            _obj_attrs[attr]: deepcopy(value)
+            for attr, value in obj.items()
+            if attr in _obj_attrs
+        }
 
     # Main methods
 
@@ -715,7 +764,7 @@ class ObjectStore:
 
         """
         if validate:
-            self.__validate_dn(dn, ldap.RES_SEARCH_ENTRY)
+            self.__validate_dn(dn, ldap.RES_SEARCH_ENTRY)  # type: ignore[attr-defined]
         return dn in self.objects
 
     def get(self, dn: str) -> LDAPData:
@@ -730,19 +779,21 @@ class ObjectStore:
 
         Returns:
             The data for an LDAP object
+
         """
-        self.__validate_dn(dn, ldap.RES_SEARCH_ENTRY)
+        self.__validate_dn(dn, ldap.RES_SEARCH_ENTRY)  # type: ignore[attr-defined]
         try:
             return self.raw_objects[dn]
         except KeyError as exc:
-            raise ldap.NO_SUCH_OBJECT(
+            raise ldap.NO_SUCH_OBJECT(  # type: ignore[attr-defined]
                 {
-                    'msgtype': 101,
-                    'msgid': 4,
-                    'result': 32,
-                    'desc': 'No such object',
-                    'ctrls': [],
-                }) from exc
+                    "msgtype": 101,
+                    "msgid": 4,
+                    "result": 32,
+                    "desc": "No such object",
+                    "ctrls": [],
+                }
+            ) from exc
 
     def copy(self, dn: str) -> LDAPData:
         """
@@ -756,12 +807,13 @@ class ObjectStore:
 
         Returns:
             The data for an LDAP object
+
         """
-        self.__validate_dn(dn, ldap.RES_SEARCH_ENTRY)
-        for hook_func in hooks.get('pre_copy', self.tags):
+        self.__validate_dn(dn, ldap.RES_SEARCH_ENTRY)  # type: ignore[attr-defined]
+        for hook_func in hooks.get("pre_copy", self.tags):
             hook_func(self, dn)
         data = deepcopy(self.get(dn))
-        for hook_func in hooks.get('post_copy', self.tags):
+        for hook_func in hooks.get("post_copy", self.tags):
             data = hook_func(self, data)
         return data
 
@@ -777,12 +829,13 @@ class ObjectStore:
         Raises:
             ldap.INVALID_DN_SYNTAX: the DN is not well formed
             TypeError: the LDAPData portion was not of type ``Dict[str, List[bytes]]``
+
         """
         self.__validate_LDAPRecord((dn, data))
         self.raw_objects[dn] = data
         self.objects[dn] = self.convert_LDAPData(data)
 
-    def set(self, dn: str, data: LDAPData, bind_dn: str = None) -> None:
+    def set(self, dn: str, data: LDAPData, bind_dn: str | None = None) -> None:
         """
         Add or update data for the object with dn ``dn``.
 
@@ -796,22 +849,23 @@ class ObjectStore:
         Raises:
             ldap.INVALID_DN_SYNTAX: the DN is not well formed
             TypeError: the LDAPData portion was not of type ``Dict[str, List[bytes]]``
+
         """
         self.__validate_LDAPRecord((dn, data))
-        for hook_func in hooks.get('pre_set', self.tags):
+        for hook_func in hooks.get("pre_set", self.tags):
             hook_func(self, (dn, data), bind_dn)
         self._set(dn, data)
         self.raw_objects[dn] = data
         self.objects[dn] = self.convert_LDAPData(data)
-        for hook_func in hooks.get('post_set', self.tags):
+        for hook_func in hooks.get("post_set", self.tags):
             hook_func(self, (dn, data), bind_dn)
 
-    def update(self, dn: str,  modlist: ModList, bind_dn: str = None) -> None:
+    def update(self, dn: str, modlist: ModList, bind_dn: str | None = None) -> None:  # noqa: PLR0912
         """
         Modify the object with dn of ``dn`` using the modlist ``modlist``.
 
         Each element in the list modlist should be a tuple of the form
-        ``(mod_op: int, mod_type: str, mod_vals: Union[bytes, List[bytes]])``, where
+        ``(mod_op: int, mod_type: str, mod_vals: bytes | List[bytes])``, where
         ``mod_op`` indicates the operation (one of :py:attr:`ldap.MOD_ADD`,
         :py:attr:`ldap.MOD_DELETE`, or :py:attr:`ldap.MOD_REPLACE`, ``mod_type``
         is a string indicating the attribute type name, and ``mod_vals`` is
@@ -851,9 +905,10 @@ class ObjectStore:
                 attribute, but it was already in the value list
             ldap.INSUFFICIENT_ACCESS: you need to do a non-anonymous bind before
                 doing this
+
         """
 
-        def get_overlaps(source: List[bytes], other: List[bytes]) -> Set[bytes]:
+        def get_overlaps(source: list[bytes], other: list[bytes]) -> set[bytes]:
             """
             Given two lists of bytes, return a set of the items that are in
             both, ignoring the case of the values.
@@ -864,13 +919,14 @@ class ObjectStore:
 
             Returns:
                 The list of items that are in both.  These items will be lowercased.
+
             """
             current = {v.lower() for v in source}
             updates = {v.lower() for v in other}
             return current.intersection(updates)
 
-        self.__validate_dn(dn, ldap.RES_MODIFY)
-        for hook_func in hooks.get('pre_update', self.tags):
+        self.__validate_dn(dn, ldap.RES_MODIFY)  # type: ignore[attr-defined]
+        for hook_func in hooks.get("pre_update", self.tags):
             hook_func(self, dn, modlist, bind_dn)
         # We want to use a deepcopy of our data here so we don't act directly
         # on the data in the store before we do our self.set(); something may
@@ -884,16 +940,18 @@ class ObjectStore:
         obj = deepcopy(self.get(dn))
         for item in modlist:
             op, key, value = item
-            if op not in (ldap.MOD_ADD, ldap.MOD_DELETE, ldap.MOD_REPLACE):
-                raise ldap.PROTOCOL_ERROR({
-                    'msgtype': ldap.RES_MODIFY,
-                    'msgid': 4,
-                    'result': 2,
-                    'desc': 'Protocol error',
-                    'info': 'unrecognized modify operation',
-                    'ctrls': []
-                })
-            if op == ldap.MOD_ADD:
+            if op not in (ldap.MOD_ADD, ldap.MOD_DELETE, ldap.MOD_REPLACE):  # type: ignore[attr-defined]
+                raise ldap.PROTOCOL_ERROR(  # type: ignore[attr-defined]
+                    {
+                        "msgtype": ldap.RES_MODIFY,  # type: ignore[attr-defined]
+                        "msgid": 4,
+                        "result": 2,
+                        "desc": "Protocol error",
+                        "info": "unrecognized modify operation",
+                        "ctrls": [],
+                    }
+                )
+            if op == ldap.MOD_ADD:  # type: ignore[attr-defined]
                 self.__check_bytes(value)
                 if key not in obj:
                     obj[key] = value
@@ -903,14 +961,16 @@ class ObjectStore:
                     if not overlaps:
                         obj[key].extend(value)
                     else:
-                        raise ldap.TYPE_OR_VALUE_EXISTS({
-                            'msgtype': ldap.RES_MODIFY,
-                            'msgid': 4,
-                            'result': 20,
-                            'desc': 'Type or value exists',
-                            'ctrls': []
-                        })
-            elif op == ldap.MOD_DELETE:
+                        raise ldap.TYPE_OR_VALUE_EXISTS(  # type: ignore[attr-defined]
+                            {
+                                "msgtype": ldap.RES_MODIFY,  # type: ignore[attr-defined]
+                                "msgid": 4,
+                                "result": 20,
+                                "desc": "Type or value exists",
+                                "ctrls": [],
+                            }
+                        )
+            elif op == ldap.MOD_DELETE:  # type: ignore[attr-defined]
                 if value is None:
                     # If value was None, delete the whole attribute
                     del obj[key]
@@ -919,14 +979,14 @@ class ObjectStore:
                     self.__check_bytes(value)
                     overlaps = get_overlaps(obj[key], value)
                     obj[key] = [v for v in obj[key] if v.lower() not in overlaps]
-            elif op == ldap.MOD_REPLACE:
+            elif op == ldap.MOD_REPLACE:  # type: ignore[attr-defined]
                 self.__check_bytes(value)
                 obj[key] = value
         self.set(dn, obj, bind_dn=bind_dn)
-        for hook_func in hooks.get('post_update', self.tags):
+        for hook_func in hooks.get("post_update", self.tags):
             hook_func(self, obj, bind_dn)
 
-    def create(self, dn: str, modlist: AddModList, bind_dn: str = None) -> None:
+    def create(self, dn: str, modlist: AddModList, bind_dn: str | None = None) -> None:
         """
         Create an object in our store with dn of ``dn``.
 
@@ -958,27 +1018,33 @@ class ObjectStore:
 
         Raises:
             ldap.INVALID_DN_SYNTAX: the dn was not well-formed
-            ldap.ALREADY_EXISTS: an object with dn of ``dn`` already exists in our object store
-            ldap.INSUFFICIENT_ACCESS: you need to do a non-anonymous bind before doing this
+            ldap.ALREADY_EXISTS: an object with dn of ``dn`` already exists in
+                our object store
+            ldap.INSUFFICIENT_ACCESS: you need to do a non-anonymous bind before
+                doing this
+
         """
-        self.__validate_dn(dn, ldap.RES_ADD)
-        for hook_func in hooks.get('pre_create', self.tags):
+        self.__validate_dn(dn, ldap.RES_ADD)  # type: ignore[attr-defined]
+        for hook_func in hooks.get("pre_create", self.tags):
             hook_func(self, dn, modlist, bind_dn)
         if self.exists(dn):
-            # FIXME: probably this error dict is not complete
-            raise ldap.ALREADY_EXISTS({'info': '', 'desc': 'Object already exists'})
+            # TODO: probably this error dict is not complete
+            raise ldap.ALREADY_EXISTS(  # type: ignore[attr-defined]
+                {"info": "", "desc": "Object already exists"}
+            )
         entry = {}
         for item in modlist:
             attr, value = item
             if not isinstance(attr, str):
-                raise TypeError(f'Tuple_to_LDAPMod() argument 1 must be str, not {type(attr)}')
+                msg = f"Tuple_to_LDAPMod() argument 1 must be str, not {type(attr)}"
+                raise TypeError(msg)
             self.__check_bytes(value)
             entry[attr] = value
         self.set(dn, entry, bind_dn=bind_dn)
-        for hook_func in hooks.get('post_create', self.tags):
+        for hook_func in hooks.get("post_create", self.tags):
             hook_func(self, (dn, entry), bind_dn)
 
-    def delete(self, dn: str, bind_dn: str = None) -> None:
+    def delete(self, dn: str, bind_dn: str | None = None) -> None:
         """
         Delete an object from our objects directory.
 
@@ -990,29 +1056,32 @@ class ObjectStore:
 
         Raises:
             ldap.INVALID_DN_SYNTAX: the dn was not well-formed
+
         """
-        self.__validate_dn(dn, ldap.RES_DELETE)
+        self.__validate_dn(dn, ldap.RES_DELETE)  # type: ignore[attr-defined]
         if not self.exists(dn):
-            raise ldap.NO_SUCH_OBJECT({
-                'msgtype': 101,
-                'msgid': 4,
-                'result': 32,
-                'desc': 'No such object',
-                'ctrls': [],
-            })
+            raise ldap.NO_SUCH_OBJECT(  # type: ignore[attr-defined]
+                {
+                    "msgtype": 101,
+                    "msgid": 4,
+                    "result": 32,
+                    "desc": "No such object",
+                    "ctrls": [],
+                }
+            )
         obj = self.copy(dn)
-        for hook_func in hooks.get('pre_delete', self.tags):
+        for hook_func in hooks.get("pre_delete", self.tags):
             hook_func(self, (dn, obj), bind_dn=bind_dn)
         del self.objects[dn]
         del self.raw_objects[dn]
-        for hook_func in hooks.get('post_delete', self.tags):
+        for hook_func in hooks.get("post_delete", self.tags):
             hook_func(self, (dn, obj), bind_dn=bind_dn)
 
     def search_base(
         self,
         base: str,
         filterstr: str,
-        attrlist: List[str] = None,
+        attrlist: list[str] | None = None,
     ) -> LDAPSearchResult:
         """
         Do a :py:data:`ldap.SCOPE_BASE` search.  Return the requested attributes
@@ -1028,7 +1097,8 @@ class ObjectStore:
             Some attributes are "operational" and are not returned by default
             They must be named specifically if you want them.  Example:
 
-            >>> store.search_base('thebasedn', '(objectclass=*)', ['*', 'createTimestamp'])
+            >>> store.search_base(
+            'thebasedn', '(objectclass=*)', ['*', 'createTimestamp'])
 
         Args:
             base: the dn of the object to return
@@ -1040,13 +1110,14 @@ class ObjectStore:
         Raises:
             ldap.INVALID_DN_SYNTAX: ``base`` was not a well-formed DN
             ldap.FILTER_ERROR: ``filterstr`` is has bad filter syntax
-            ldap.NO_SUCH_OBJECT: no object with dn of ``base`` exists in the object store
+            ldap.NO_SUCH_OBJECT: no object with dn of ``base`` exists in the
+                object store
 
         Returns:
             A list with one element -- the object with dn of ``base``.
 
         """
-        self.__validate_dn(base, ldap.RES_SEARCH_RESULT)
+        self.__validate_dn(base, ldap.RES_SEARCH_RESULT)  # type: ignore[attr-defined]
         data = self.get(base)
         ci_data = self.objects[base]
         results: LDAPSearchResult = []
@@ -1066,7 +1137,7 @@ class ObjectStore:
         self,
         base: str,
         filterstr: str,
-        attrlist: List[str] = None,
+        attrlist: list[str] | None = None,
     ) -> LDAPSearchResult:
         """
         Do a :py:data:`ldap.SCOPE_ONELEVEL` search, for objects directly under
@@ -1090,30 +1161,35 @@ class ObjectStore:
 
         Returns:
             A list of LDAP objects -- 2-tuples of ``(dn, data)``.
+
         """
-        self.__validate_dn(base, ldap.RES_SEARCH_RESULT)
-        basedn_parts = ldap.dn.explode_dn(base.lower(), flags=ldap.DN_FORMAT_LDAPV3)
+        self.__validate_dn(base, ldap.RES_SEARCH_RESULT)  # type: ignore[attr-defined]
+        basedn_parts = ldap.dn.explode_dn(base.lower(), flags=ldap.DN_FORMAT_LDAPV3)  # type: ignore[attr-defined]
         filt = None
         if not self._DEFAULT_SEARCH_RE.search(filterstr):
             filt = self.__parse_filterstr(filterstr)
         results: LDAPSearchResult = []
         for dn, data in self.objects.items():
-            dn_parts = ldap.dn.explode_dn(dn.lower(), flags=ldap.DN_FORMAT_LDAPV3)
+            dn_parts = ldap.dn.explode_dn(dn.lower(), flags=ldap.DN_FORMAT_LDAPV3)  # type: ignore[attr-defined]
             if dn_parts[1:] != basedn_parts:
                 continue
             if filt:
                 if filt.match(data):
-                    results.append((dn, self.__filter_attributes(self.raw_objects[dn], attrlist)))
+                    results.append(
+                        (dn, self.__filter_attributes(self.raw_objects[dn], attrlist))
+                    )
             else:
-                results.append((dn, self.__filter_attributes(self.raw_objects[dn], attrlist)))
+                results.append(
+                    (dn, self.__filter_attributes(self.raw_objects[dn], attrlist))
+                )
         return results
 
     def search_subtree(
         self,
         base: str,
         filterstr: str,
-        attrlist: List[str] = None,
-        include_operational_attributes: bool = False
+        attrlist: list[str] | None = None,
+        include_operational_attributes: bool = False,
     ) -> LDAPSearchResult:
         """
         Do a :py:data:`ldap.SCOPE_SUBTREE` search, for objects under basedn
@@ -1139,9 +1215,10 @@ class ObjectStore:
 
         Returns:
             A list of LDAP objects -- 2-tuples of ``(dn, data)``.
+
         """
-        self.__validate_dn(base, ldap.RES_SEARCH_RESULT)
-        basedn_parts = ldap.dn.explode_dn(base.lower(), flags=ldap.DN_FORMAT_LDAPV3)
+        self.__validate_dn(base, ldap.RES_SEARCH_RESULT)  # type: ignore[attr-defined]
+        basedn_parts = ldap.dn.explode_dn(base.lower(), flags=ldap.DN_FORMAT_LDAPV3)  # type: ignore[attr-defined]
 
         filt = None
         if not self._DEFAULT_SEARCH_RE.search(filterstr):
@@ -1150,26 +1227,30 @@ class ObjectStore:
         for dn, data in self.objects.items():
             if basedn_parts:
                 # ``base`` was not the Root DN, so see if the object is under ``base``
-                dn_parts = ldap.dn.explode_dn(dn.lower(), flags=ldap.DN_FORMAT_LDAPV3)
-                if dn_parts[-len(basedn_parts):] != basedn_parts:
+                dn_parts = ldap.dn.explode_dn(dn.lower(), flags=ldap.DN_FORMAT_LDAPV3)  # type: ignore[attr-defined]
+                if dn_parts[-len(basedn_parts) :] != basedn_parts:
                     continue
             if filt:
                 if filt.match(data):
-                    results.append((
+                    results.append(
+                        (
+                            dn,
+                            self.__filter_attributes(
+                                self.raw_objects[dn],
+                                attrlist,
+                                include_operational_attributes=include_operational_attributes,
+                            ),
+                        )
+                    )
+            else:
+                results.append(
+                    (
                         dn,
                         self.__filter_attributes(
                             self.raw_objects[dn],
                             attrlist,
-                            include_operational_attributes=include_operational_attributes
-                        )
-                    ))
-            else:
-                results.append((
-                    dn,
-                    self.__filter_attributes(
-                        self.raw_objects[dn],
-                        attrlist,
-                        include_operational_attributes=include_operational_attributes
+                            include_operational_attributes=include_operational_attributes,
+                        ),
                     )
-                ))
+                )
         return results
