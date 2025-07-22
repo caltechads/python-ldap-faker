@@ -9,7 +9,8 @@ dist: clean
 release: dist
 	@bin/release.sh
 
-	@twine upload dist/*
+compile: uv.lock
+	@uv pip compile --group docs --group test pyproject.toml -o requirements.txt
 
 tox:
 	# create a tox pyenv virtualenv based on 3.7.x

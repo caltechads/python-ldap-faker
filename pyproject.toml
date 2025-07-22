@@ -52,7 +52,7 @@ test = [
 ]
 docs = [
     "sphinx<=7",
-    "sphinx-rtd-theme>=2.0.0",
+    "sphinx-rtd-theme<=2.0.0",
 ]
 
 [build-system]
