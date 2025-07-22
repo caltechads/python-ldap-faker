@@ -2,13 +2,13 @@
 # See https://docs.readthedocs.io/en/stable/config-file/v2.html for details
 version: 2
 build:
+  apt_packages:
+    - python3-dev
+    - libsasl2-dev
+    - libldap2-dev
   os: ubuntu-22.04
   tools:
-    - python: "3.11"
-  apt_packages:
-    - libsasl2-dev
-    - libldap-common
-    - libldap-dev
+    python: "3.11"
 
 sphinx:
   configuration: doc/source/conf.py
