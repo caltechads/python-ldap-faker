@@ -1063,8 +1063,56 @@ class FakeLDAPObject:
                 entire object
 
         """
+        # Handle Root DSE queries (empty string DN)
+        if scope == ldap.SCOPE_BASE and base == "":
+            return self._get_root_dse(filterstr, attrlist)
+
         if scope == ldap.SCOPE_BASE:
             return self.store.search_base(base, filterstr, attrlist=attrlist)
         if scope == ldap.SCOPE_ONELEVEL:
             return self.store.search_onelevel(base, filterstr, attrlist=attrlist)
         return self.store.search_subtree(base, filterstr, attrlist=attrlist)
+
+    def _get_root_dse(
+        self,
+        filterstr: str = "(objectClass=*)",
+        attrlist: list[str] | None = None,
+    ) -> list[LDAPRecord]:
+        """
+        Return a fake Root DSE entry that includes supported controls.
+
+        Args:
+            filterstr: the filter to use for the search
+            attrlist: the list of attributes to return for each object
+
+        Returns:
+            A list containing the Root DSE entry with supported controls.
+        """
+        # Define the Root DSE entry with supported controls
+        root_dse = {
+            "objectClass": [b"top"],
+            "supportedControl": [
+                b"1.2.840.113556.1.4.473",  # Server Side Sort (RFC 2891)
+                b"1.2.840.113556.1.4.319",  # Paged Results (RFC 2696)
+            ],
+            "supportedSASLMechanisms": [b"PLAIN", b"LOGIN"],
+            "supportedLDAPVersion": [b"3"],
+            "namingContexts": [b"dc=example,dc=com"],
+        }
+
+        # Filter attributes if attrlist is specified
+        if attrlist is not None:
+            filtered_dse = {}
+            for attr in attrlist:
+                if attr in root_dse:
+                    filtered_dse[attr] = root_dse[attr]
+            root_dse = filtered_dse
+
+        # For now, we'll return the Root DSE for any filter that matches objectClass=*
+        # This is a simplified approach - in a real implementation, you might want
+        # to parse the filter and apply it properly
+        if filterstr == "(objectClass=*)" or "objectClass" in filterstr:
+            return [("", root_dse)]
+
+        # If the filter doesn't match, return empty result
+        return []

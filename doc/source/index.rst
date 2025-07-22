@@ -68,6 +68,9 @@ Features:
 * For ``search_ext`` and ``search_s``, your filter string will be validated as a
   valid LDAP filter, and your filter will be applied directly to your objects in
   our fake "server" to generate the result list.  No canned searches!
+* For search, both Paged Results (OID 1.2.840.113556.1.4.319) and server side
+  sorting (OID 1.2.840.113556.1.4.473) are supported and are advertised when
+  the server side checks what controls it supports.
 * Inspect your call history for all calls (name, arguments), and test the order
   in which they were made
 * Simulate multiple fake LDAP "servers" with different sets of objects that

@@ -935,3 +935,120 @@ class TestObjectStore_modrdn_s(RegisterObjectsMixin, unittest.TestCase):
         self.ldap.modrdn_s(self.dn, self.newrdn)
         self.assertTrue(self.store.exists(newdn))
         self.assertFalse(self.store.exists(self.dn))
+
+
+class TestObjectStore_root_dse(RegisterObjectsMixin, unittest.TestCase):
+    """Test Root DSE functionality in FakeLDAPObject."""
+
+    def test_root_dse_query_returns_entry(self):
+        """Test that Root DSE query returns the expected entry."""
+        results = self.ldap.search_s("", ldap.SCOPE_BASE, "(objectClass=*)")
+
+        self.assertEqual(len(results), 1)
+        dn, attrs = results[0]
+        self.assertEqual(dn, "")
+        self.assertIn("objectClass", attrs)
+        self.assertIn("supportedControl", attrs)
+
+    def test_root_dse_supported_control_contains_server_side_sort(self):
+        """Test that Root DSE includes Server Side Sort OID."""
+        results = self.ldap.search_s("", ldap.SCOPE_BASE, "(objectClass=*)")
+        dn, attrs = results[0]
+
+        supported_controls = attrs["supportedControl"]
+        server_side_sort_oid = b"1.2.840.113556.1.4.473"
+        self.assertIn(server_side_sort_oid, supported_controls)
+
+    def test_root_dse_supported_control_contains_paged_results(self):
+        """Test that Root DSE includes Paged Results OID."""
+        results = self.ldap.search_s("", ldap.SCOPE_BASE, "(objectClass=*)")
+        dn, attrs = results[0]
+
+        supported_controls = attrs["supportedControl"]
+        paged_results_oid = b"1.2.840.113556.1.4.319"
+        self.assertIn(paged_results_oid, supported_controls)
+
+    def test_root_dse_supported_control_oids_are_bytes(self):
+        """Test that supportedControl OIDs are returned as bytes."""
+        results = self.ldap.search_s("", ldap.SCOPE_BASE, "(objectClass=*)")
+        dn, attrs = results[0]
+
+        supported_controls = attrs["supportedControl"]
+        for oid in supported_controls:
+            self.assertIsInstance(oid, bytes)
+
+    def test_root_dse_attrlist_filtering_works(self):
+        """Test that attrlist parameter works for Root DSE queries."""
+        results = self.ldap.search_s(
+            "", ldap.SCOPE_BASE, "(objectClass=*)", attrlist=["supportedControl"]
+        )
+
+        self.assertEqual(len(results), 1)
+        dn, attrs = results[0]
+        self.assertEqual(dn, "")
+        self.assertIn("supportedControl", attrs)
+        self.assertNotIn("objectClass", attrs)
+        self.assertNotIn("supportedSASLMechanisms", attrs)
+
+    def test_root_dse_attrlist_multiple_attributes(self):
+        """Test that multiple attributes can be requested from Root DSE."""
+        results = self.ldap.search_s(
+            "",
+            ldap.SCOPE_BASE,
+            "(objectClass=*)",
+            attrlist=["supportedControl", "supportedSASLMechanisms"],
+        )
+
+        self.assertEqual(len(results), 1)
+        dn, attrs = results[0]
+        self.assertEqual(dn, "")
+        self.assertIn("supportedControl", attrs)
+        self.assertIn("supportedSASLMechanisms", attrs)
+        self.assertNotIn("objectClass", attrs)
+
+    def test_root_dse_non_objectclass_filter_returns_empty(self):
+        """Test that non-objectClass filters return empty results."""
+        results = self.ldap.search_s("", ldap.SCOPE_BASE, "(cn=*)")
+
+        self.assertEqual(len(results), 0)
+
+    def test_non_root_dse_queries_still_work(self):
+        """Test that non-Root DSE queries continue to work normally."""
+        # This should still work as before
+        results = self.ldap.search_s(
+            "uid=fred,ou=mydept,o=myorg,c=country", ldap.SCOPE_BASE, "(objectClass=*)"
+        )
+
+        self.assertEqual(len(results), 1)
+        dn, attrs = results[0]
+        self.assertEqual(dn, "uid=fred,ou=mydept,o=myorg,c=country")
+        self.assertIn("cn", attrs)
+
+    def test_root_dse_records_call(self):
+        """Test that Root DSE queries are recorded in call history."""
+        self.ldap.search_s("", ldap.SCOPE_BASE, "(objectClass=*)")
+
+        self.assertTrue("search_s" in self.ldap.calls.names)
+        call = self.ldap.calls.filter_calls("search_s")[0]
+        self.assertEqual(call.args["base"], "")
+        self.assertEqual(call.args["scope"], ldap.SCOPE_BASE)
+        self.assertEqual(call.args["filterstr"], "(objectClass=*)")
+
+    def test_root_dse_contains_standard_attributes(self):
+        """Test that Root DSE contains standard LDAP server attributes."""
+        results = self.ldap.search_s("", ldap.SCOPE_BASE, "(objectClass=*)")
+        dn, attrs = results[0]
+
+        # Check for standard Root DSE attributes
+        self.assertIn("objectClass", attrs)
+        self.assertIn("supportedControl", attrs)
+        self.assertIn("supportedSASLMechanisms", attrs)
+        self.assertIn("supportedLDAPVersion", attrs)
+        self.assertIn("namingContexts", attrs)
+
+    def test_root_dse_objectclass_is_top(self):
+        """Test that Root DSE objectClass is 'top'."""
+        results = self.ldap.search_s("", ldap.SCOPE_BASE, "(objectClass=*)")
+        dn, attrs = results[0]
+
+        self.assertEqual(attrs["objectClass"], [b"top"])
