@@ -1,6 +1,6 @@
 [project]
 name = "python-ldap-faker"
-version = "1.2.0"
+version = "1.2.1"
 description = "Fake python-ldap functions, objects and methods for use in testing."
 readme = "README.md"
 requires-python = ">=3.10"
