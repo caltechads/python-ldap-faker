@@ -111,21 +111,21 @@ def decode_vlv_control_value(control_value: bytes) -> dict[str, int | str | None
         decoded = control_value.decode("utf-8", errors="ignore")
         parts = decoded.split(",")
 
-        if len(parts) >= 3:
+        if len(parts) >= 3:  # noqa: PLR2004
             return {
                 "beforeCount": int(parts[0]),
                 "afterCount": int(parts[1]),
                 "target": int(parts[2]),
-                "contextID": parts[3] if len(parts) > 3 else None,
+                "contextID": parts[3] if len(parts) > 3 else None,  # noqa: PLR2004
             }
-        elif len(parts) >= 2:
+        if len(parts) >= 2:  # noqa: PLR2004
             return {
                 "beforeCount": int(parts[0]),
                 "afterCount": int(parts[1]),
                 "target": 0,
                 "contextID": None,
             }
-        else:
+        else:  # noqa: RET505
             return {"beforeCount": 0, "afterCount": 0, "target": 0, "contextID": None}
     except (ValueError, UnicodeDecodeError):
         # Fallback to default values if decoding fails
@@ -625,7 +625,7 @@ class FakeLDAPObject:
         return ""
 
     @record_call
-    def search_ext(
+    def search_ext(  # noqa: PLR0912
         self,
         base: str,
         scope: int,
@@ -826,7 +826,8 @@ class FakeLDAPObject:
 
         # --- LDAP VLV control simulation ---
         # If a control with OID 2.16.840.1.113730.3.4.9 is present, apply VLV slicing.
-        # We decode the controlValue to get VLV parameters and slice the results accordingly.
+        # We decode the controlValue to get VLV parameters and slice the results
+        # accordingly.
         vlv_response_ctrl = None
         if serverctrls:
             for ctrl in serverctrls:
@@ -863,7 +864,7 @@ class FakeLDAPObject:
 
                         vlv_response_ctrl = ldap.controls.LDAPControl(
                             "2.16.840.1.113730.3.4.10",  # VLV Response Control OID
-                            True,
+                            True,  # noqa: FBT003
                             encode_vlv_response_control(
                                 target_pos, total_count, context_id_bytes
                             ),
@@ -1252,6 +1253,7 @@ class FakeLDAPObject:
 
         Returns:
             A list containing the Root DSE entry with supported controls.
+
         """
         # Define the Root DSE entry with supported controls
         root_dse = {

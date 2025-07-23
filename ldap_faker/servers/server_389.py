@@ -1,18 +1,18 @@
+import textwrap
+import uuid
 from copy import deepcopy
 from datetime import datetime
-import textwrap
-from typing import Final, List, Set
-import uuid
+from typing import Final
+from zoneinfo import ZoneInfo
 
 import ldap
 from ldap_filter import Filter
 
-from ..hooks import hooks
 from ..db import ObjectStore
-from ..types import LDAPData, LDAPRecord, ModList, AddModList
+from ..hooks import hooks
+from ..types import AddModList, LDAPData, LDAPRecord, ModList
 
-
-READONLY_ATTRIBUTES_389: Final[List[str]] = [
+READONLY_ATTRIBUTES_389: Final[list[str]] = [
     "entryid",
     "nsUniqueId",
     "entrydn",
@@ -29,7 +29,7 @@ READONLY_ATTRIBUTES_389: Final[List[str]] = [
 # ====================
 
 
-def filterstr_for_users_with_attr(values: List[str], attr: str) -> str:
+def filterstr_for_users_with_attr(values: list[str], attr: str) -> str:
     """
     Return an LDAP filter string for LDAP "user" records that have at least one
     of the values from ``values`` in their ``attr`` attribute.
@@ -40,11 +40,12 @@ def filterstr_for_users_with_attr(values: List[str], attr: str) -> str:
         ``userPassword`` attribute on it is a user.
 
     Args:
-        dns: a list of nsroledns
+        values: a list of values to compare against
         attr: the attr to compare against
 
     Returns:
         A filter string
+
     """
     if len(values) > 1:
         parts = "".join([f"({attr}={v})" for v in values])
@@ -53,8 +54,7 @@ def filterstr_for_users_with_attr(values: List[str], attr: str) -> str:
         filterstr = f"({attr}={values[0]})"
     # We're cheating here by assuming that objects with userPassword should also
     # have nsroledn
-    filterstr = f"(&(userpassword=*){filterstr})"
-    return filterstr
+    return f"(&(userpassword=*){filterstr})"
 
 
 def remove_dn_from_nsrole(store: ObjectStore, dn: str) -> None:
@@ -64,6 +64,7 @@ def remove_dn_from_nsrole(store: ObjectStore, dn: str) -> None:
     Args:
         store: the object store to work upon
         dn: the DN to remove form ``nsrole``
+
     """
     dn_bytes = dn.encode("utf-8")
     # Remove dn_bytes from all entries
@@ -81,30 +82,28 @@ def remove_dn_from_nsrole(store: ObjectStore, dn: str) -> None:
 # ====================
 
 
-def post_objectstore_init_setup_controls(
-    store: ObjectStore,
-) -> None:
+def post_objectstore_init_setup_controls(store: ObjectStore) -> None:
     """
-    This "pre_objectstore_init" hook adds some controls to ``store`` that we'll
-    need later:
+    Adds some controls to ``store`` that we'll need later:
 
-    * ``store.controls['entry_count']``: (``int``) counter for use with ``entryid``
-    * ``store.controls['roles']``: (``Dict[str, ldap_filter.Filter]``)
+        * ``store.controls['entry_count']``: (``int``) counter for use with ``entryid``
+        * ``store.controls['roles']``: (``Dict[str, ldap_filter.Filter]``)
 
-    Also register our operational attributes on the store:
+        Also register our operational attributes on the store:
 
-    * ``entrydn``
-    * ``entryid``
-    * ``nsUniqueId``
-    * ``createTimestamp``
-    * ``creatorsName``
-    * ``modifyTimestamp``
-    * ``modifiersName``
-    * ``nsrole``
-    * ``nsroledn``
+        * ``entrydn``
+        * ``entryid``
+        * ``nsUniqueId``
+        * ``createTimestamp``
+        * ``creatorsName``
+        * ``modifyTimestamp``
+        * ``modifiersName``
+        * ``nsrole``
+        * ``nsroledn``
 
     Args:
         store: the object store to work upon
+
     """
     store.controls["entry_count"] = 0
     store.controls["roles"] = {}
@@ -113,10 +112,12 @@ def post_objectstore_init_setup_controls(
 
 
 def pre_set_add_audit_fields(
-    store: ObjectStore, record: LDAPRecord, bind_dn: str | None = "Directory Manager"
+    store: ObjectStore,  # noqa: ARG001
+    record: LDAPRecord,
+    bind_dn: str | None = "Directory Manager",
 ) -> None:
     """
-    This "pre_set" hook manages the 389 server auditing attributes:
+    Hook manages the 389 server auditing attributes:
 
     * ``createTimestamp``
     * ``creatorsName``
@@ -129,11 +130,12 @@ def pre_set_add_audit_fields(
 
     Keyword Args:
         bind_dn: the dn of the bound user, if any
+
     """
     if bind_dn is None:
         bind_dn = "Directory Manager"
     data = record[1]
-    ts = datetime.utcnow().strftime("%Y%m%d%H%M%SZ").encode("utf8")
+    ts = datetime.now(ZoneInfo("UTC")).strftime("%Y%m%d%H%M%SZ").encode("utf8")
     if "createTimestamp" not in data:
         data["createTimestamp"] = [ts]
         data["creatorName"] = [bind_dn.encode("utf-8")]
@@ -142,10 +144,12 @@ def pre_set_add_audit_fields(
 
 
 def pre_set_add_operational_attributes(
-    store: ObjectStore, record: LDAPRecord, bind_dn: str | None = "Directory Manager"
+    store: ObjectStore,
+    record: LDAPRecord,
+    bind_dn: str | None = "Directory Manager",  # noqa: ARG001
 ) -> None:
     """
-    This "pre_set" hook adds the 389 server auditing attributes, if they don't
+    Adds the 389 server auditing attributes, if they don't
     already exist:
 
     * ``entrydn``
@@ -163,6 +167,7 @@ def pre_set_add_operational_attributes(
 
     Keyword Args:
         bind_dn: the dn of the bound user, if any
+
     """
     dn, data = record
     if "entrydn" not in data:
@@ -188,14 +193,14 @@ def pre_set_add_operational_attributes(
 
 
 def pre_update_prevent_readonly_attribute_modify(
-    store: ObjectStore,
-    dn: str,
+    store: ObjectStore,  # noqa: ARG001
+    dn: str,  # noqa: ARG001
     modlist: ModList,
-    bind_dn: str | None = "Directory Manager",
+    bind_dn: str | None = "Directory Manager",  # noqa: ARG001
 ) -> None:
     """
-    This "pre_update" hook raises :py:exce:`ldap.UNWILLING_TO_PERFORM` if we try
-    to update any of these attributes:
+    Raises :py:exc:`ldap.UNWILLING_TO_PERFORM` if we try to update any of these
+    attributes:
 
     * ``entrydn``
     * ``entryid``
@@ -208,13 +213,15 @@ def pre_update_prevent_readonly_attribute_modify(
 
     Args:
         store: the object store to work upon
-        record: the record to work with
+        dn: the dn of the object to work with
+        modlist: the modlist to work with
 
     Keyword Args:
         bind_dn: the dn of the bound user, if any
 
     Raises:
         ldap.UNWILLING_TO_PERFORM: we tried to update a readonly attribute
+
     """
     for entry in modlist:
         if entry[1] in READONLY_ATTRIBUTES_389:
@@ -230,13 +237,13 @@ def pre_update_prevent_readonly_attribute_modify(
 
 
 def pre_create_prevent_readonly_attribute_create(
-    store: ObjectStore,
-    dn: str,
+    store: ObjectStore,  # noqa: ARG001
+    dn: str,  # noqa: ARG001
     modlist: AddModList,
-    bind_dn: str | None = "Directory Manager",
+    bind_dn: str | None = "Directory Manager",  # noqa: ARG001
 ) -> None:
     """
-    This "pre_create" hook ignores these attributes:
+    Makes creates ignore these attributes:
 
     * ``entrydn``
     * ``entryid``
@@ -249,22 +256,22 @@ def pre_create_prevent_readonly_attribute_create(
 
     Args:
         store: the object store to work upon
-        record: the record to work with
+        dn: the dn of the object to work with
+        modlist: the modlist to work with
 
     Keyword Args:
         bind_dn: the dn of the bound user, if any
-    """
 
-    modlist[:] = [entry for entry in modlist if not entry[0] in READONLY_ATTRIBUTES_389]
+    """
+    modlist[:] = [entry for entry in modlist if entry[0] not in READONLY_ATTRIBUTES_389]
 
 
 def post_copy_remove_readonly_attributes_on_copy(
-    store: ObjectStore,
+    store: ObjectStore,  # noqa: ARG001
     data: LDAPData,
 ) -> LDAPData:
     """
-    This "post_copy" hook removes all readonly attributes from the copied
-    object.
+    Removes all readonly attributes from the copied object.
 
     * ``entrydn``
     * ``entryid``
@@ -278,15 +285,18 @@ def post_copy_remove_readonly_attributes_on_copy(
     Args:
         store: the object store to work upon
         data: the ldap attributes to work with
+
     """
     return {k: v for k, v in data.items() if k not in READONLY_ATTRIBUTES_389}
 
 
 def pre_set_update_nsrole_from_nsroledn(
-    store: ObjectStore, record: LDAPRecord, bind_dn: str | None = "Directory Manager"
+    store: ObjectStore,
+    record: LDAPRecord,
+    bind_dn: str | None = "Directory Manager",  # noqa: ARG001
 ) -> None:
     """
-    This "pre_set" hook looks at the ``nsroledn`` attribute and compare it to
+    Looks at the ``nsroledn`` attribute and compare it to
     what we currently have on our object.
 
     * Remove any DNs from ``nsrole`` that are not in ``nsroledn`` on ``record``
@@ -300,6 +310,7 @@ def pre_set_update_nsrole_from_nsroledn(
 
     Keyword Args:
         bind_dn: the dn of the bound user, if any
+
     """
     dn, data = record
     if not store.exists(dn):
@@ -307,9 +318,9 @@ def pre_set_update_nsrole_from_nsroledn(
         # in hook_add_operational_attributes
         return
     if "userPassword" in data:
-        new_dns: Set[bytes] = set(data.get("nsroledn", []))
+        new_dns: set[bytes] = set(data.get("nsroledn", []))
         old_data = store.get(dn)
-        old_dns: Set[bytes] = set(old_data.get("nsroledn", []))
+        old_dns: set[bytes] = set(old_data.get("nsroledn", []))
         adds = list(new_dns - old_dns)
         removes = list(old_dns - new_dns)
         if "nsrole" not in data:
@@ -321,12 +332,14 @@ def pre_set_update_nsrole_from_nsroledn(
 
 
 def pre_set_manage_user_nsrole(
-    store: ObjectStore, record: LDAPRecord, bind_dn: str | None = "Directory Manager"
+    store: ObjectStore,
+    record: LDAPRecord,
+    bind_dn: str | None = "Directory Manager",  # noqa: ARG001
 ) -> None:
     """
-    This "pre_set" hook manages the ``nsrole`` attribute on any object that is a
-    "user".  This applies all nested and filter roles to the our ``record`` and
-    adjusts ``nsrole`` accordingly.
+    Manages the ``nsrole`` attribute on any object that is a "user".  This
+    applies all nested and filter roles to the our ``record`` and adjusts
+    ``nsrole`` accordingly.
 
     Note:
         The ``nsrole`` and ``nsroledn`` attributes in 389 are not assigned by
@@ -340,6 +353,7 @@ def pre_set_manage_user_nsrole(
 
     Keyword Args:
         bind_dn: the dn of the bound user, if any
+
     """
     data = record[1]
     # ldap_filter.Filter.match needs Dict[str, List[str]]
@@ -349,28 +363,31 @@ def pre_set_manage_user_nsrole(
             if filt.match(cidata):
                 if dn_bytes not in data["nsrole"]:
                     data["nsrole"].append(dn_bytes)
-            else:
-                if dn_bytes in data["nsrole"]:
-                    data["nsrole"].remove(dn_bytes)
+            elif dn_bytes in data["nsrole"]:
+                data["nsrole"].remove(dn_bytes)
         data["nsrole"].sort()
 
 
 def post_set_handle_ldapsubentry_nestedrole_set(
-    store: ObjectStore, record: LDAPRecord, bind_dn: str | None = None
+    store: ObjectStore,
+    record: LDAPRecord,
+    bind_dn: str | None = None,  # noqa: ARG001
 ) -> None:
     """
-    This "post_set" hook deals with adding or updating nsNestedRoleDefinition
+    Deals with adding or updating nsNestedRoleDefinition objects.
     objects.
 
     This will update the ``nsrole`` attribute of all "user" objects with one
     of this object`s ``nsroledn`` DNs to have this object's DN, and remove this
     object's DN from the ``nsrole`` attribute of all other "user"  objects.
+
     Args:
         store: the object store to work upon
         record: the record to work with
 
     Keyword Args:
         bind_dn: the dn of the bound user, if any
+
     """
     dn, data = record
     keys = {attr.lower(): attr for attr in data}
@@ -393,11 +410,12 @@ def post_set_handle_ldapsubentry_nestedrole_set(
 
 
 def post_set_handle_ldapsubentry_searchrole_set(
-    store: ObjectStore, record: LDAPRecord, bind_dn: str | None = None
+    store: ObjectStore,
+    record: LDAPRecord,
+    bind_dn: str | None = None,  # noqa: ARG001
 ) -> None:
     """
-    This "post_set" hook deals with adding or updating nsFilteredRoleDefinition
-    objects.
+    Deals with adding or updating nsFilteredRoleDefinition objects.
 
     This will update the ``nsrole`` attribute of all "user" objects with one
     of this object`s ``nsroledn`` DNs to have this object's DN, and remove this
@@ -409,6 +427,7 @@ def post_set_handle_ldapsubentry_searchrole_set(
 
     Keyword Args:
         bind_dn: the dn of the bound user, if any
+
     """
     dn, data = record
     keys = {attr.lower(): attr for attr in data}
@@ -419,6 +438,7 @@ def post_set_handle_ldapsubentry_searchrole_set(
     remove_dn_from_nsrole(store, dn)
     # Then add dn_bytes to all that match our filterstr
     dn_bytes = dn.encode("utf-8")
+    filterstr: str = ""
     if "nsrolefilter" in data:
         filterstr = data["nsrolefilter"][0].decode("utf-8")
         filterstr = f"(&(userpassword=*){filterstr})"
@@ -430,15 +450,18 @@ def post_set_handle_ldapsubentry_searchrole_set(
                 obj[1]["nsrole"].sort()
                 store._set(obj[0], obj[1])
     # Save the compiled filter for use by pre_set_manage_user_nsrole
-    store.controls["roles"][dn_bytes] = Filter.parse(filterstr)
+    if filterstr:
+        store.controls["roles"][dn_bytes] = Filter.parse(filterstr)
 
 
 def post_delete_handle_ldapsubentry_delete(
-    store: ObjectStore, record: LDAPRecord, bind_dn: str | None = None
+    store: ObjectStore,
+    record: LDAPRecord,
+    bind_dn: str | None = None,  # noqa: ARG001
 ) -> None:
     """
-    This "post_delete" hook deals with deleting nsFilteredRoleDefinition or
-    nsNestedRoleDefinition objects.
+    Deals with deleting nsFilteredRoleDefinition or nsNestedRoleDefinition
+    objects.
 
     This will remove the dn of our ldapsubentry from ``nsrole`` attribute of all
     "user" objects.
@@ -449,10 +472,11 @@ def post_delete_handle_ldapsubentry_delete(
 
     Keyword Args:
         bind_dn: the dn of the bound user, if any
+
     """
     dn, data = record
     keys = {attr.lower(): attr for attr in data}
-    targets = set([b"nsfilteredroledefinition", b"nsnestedroledefinition"])
+    targets = {b"nsfilteredroledefinition", b"nsnestedroledefinition"}
     objectclasses = {o.lower() for o in data.get(keys["objectclass"], [])}
     if not objectclasses.intersection(targets):
         return
