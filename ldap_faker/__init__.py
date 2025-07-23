@@ -1,32 +1,24 @@
 __version__ = "1.2.1"
 
-from .hooks import (  # noqa:F403,F401
-    hooks,
-    Hook,
-    HookDefinition,
-    HookRegistry,
-)
-from .faker import (  # noqa:F403,F401
-    FakeLDAP,
-    FakeLDAPObject,
-)
-
-from .db import (  # noqa:F403,F401
+from .db import (
     CallHistory,
     LDAPCallRecord,
     LDAPServerFactory,
     ObjectStore,
     OptionStore,
 )
-from .unittest import (  # noqa:F403,F401
-    LDAPFakerMixin
+from .faker import (
+    FakeLDAP,
+    FakeLDAPObject,
 )
-from .types import (
-    LDAPData,
-    LDAPRecord,
-    LDAPSearchResult,
-    LDAPOptionValue
+from .hooks import (
+    Hook,
+    HookDefinition,
+    HookRegistry,
+    hooks,
 )
+from .types import LDAPData, LDAPOptionValue, LDAPRecord, LDAPSearchResult
+from .unittest import LDAPFakerMixin
 
 # Import our hooks
-import ldap_faker.servers.server_389  # pylint: disable=wrong-import-order  # noqa:F401
+import ldap_faker.servers.server_389

@@ -71,6 +71,8 @@ Features:
 * For search, both Paged Results (OID 1.2.840.113556.1.4.319) and server side
   sorting (OID 1.2.840.113556.1.4.473) are supported and are advertised when
   the server side checks what controls it supports.
+* Virtual List View (VLV) control (OID 2.16.840.1.113730.3.4.9) is supported for
+  efficient pagination of large result sets and is advertised in the Root DSE.
 * Inspect your call history for all calls (name, arguments), and test the order
   in which they were made
 * Simulate multiple fake LDAP "servers" with different sets of objects that

@@ -88,4 +88,85 @@ ldapsubentries
       object's ``nsRoleFilter``.
 
 
+Virtual List View (VLV) Control Support
+---------------------------------------
 
+Virtual List View (VLV) is an LDAP control extension that provides efficient pagination
+of large result sets. It allows clients to request a specific "window" of results
+around a target position, which is particularly useful for implementing pagination
+in user interfaces.
+
+VLV is supported out of the box in python-ldap-faker and is automatically advertised
+in the Root DSE when clients query for supported controls.
+
+VLV Request Control
+^^^^^^^^^^^^^^^^^^^
+
+The VLV request control (OID: ``2.16.840.1.113730.3.4.9``) allows clients to specify:
+
+* **beforeCount**: Number of entries to return before the target position
+* **afterCount**: Number of entries to return after the target position
+* **target**: The target position (0-based index) in the result set
+* **contextID**: Optional context identifier for maintaining state
+
+Example usage::
+
+    import ldap
+    from ldap.controls import LDAPControl
+
+    # Create VLV control: get 1 entry before and after position 1
+    vlv_value = "1,1,1".encode('utf-8')
+    vlv_control = LDAPControl(
+        '2.16.840.1.113730.3.4.9',
+        True,
+        vlv_value,
+    )
+
+    # Perform VLV search
+    msgid = conn.search_ext(
+        'dc=example,dc=com',
+        ldap.SCOPE_SUBTREE,
+        '(objectClass=person)',
+        serverctrls=[vlv_control]
+    )
+
+    # Get results
+    rtype, rdata, rmsgid, rctrls = conn.result3(msgid)
+
+VLV Response Control
+^^^^^^^^^^^^^^^^^^^^
+
+The VLV response control (OID: ``2.16.840.1.113730.3.4.10``) is automatically
+returned with VLV search results and contains:
+
+* **targetPosition**: The actual target position used (may be adjusted if requested
+  position was beyond available entries)
+* **contentCount**: Total number of entries in the result set
+* **contextID**: The context identifier if one was provided
+
+The response control value is encoded as a comma-separated string: ``"targetPosition,contentCount"``.
+
+Edge Cases
+^^^^^^^^^^
+
+* **Target beyond available entries**: If the requested target position is beyond
+  the available entries, the target is clamped to the last valid position
+* **Empty result sets**: VLV response control is still returned with target position 0
+  and content count 0
+* **Invalid control values**: Malformed VLV control values are handled gracefully
+
+Root DSE Advertisement
+^^^^^^^^^^^^^^^^^^^^^^
+
+VLV support is automatically advertised in the Root DSE when clients query for
+supported controls::
+
+    rdata = conn.search_s(
+        "",
+        ldap.SCOPE_BASE,
+        "(objectClass=*)",
+        attrlist=["supportedControl"]
+    )
+
+    # VLV OID will be present in supportedControl
+    vlv_oid = b"2.16.840.1.113730.3.4.9"

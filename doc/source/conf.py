@@ -10,11 +10,12 @@
 # add these directories to sys.path here. If the directory is relative to the
 # documentation root, use os.path.abspath to make it absolute, like shown here.
 #
-# import os
-# import sys
-# sys.path.insert(0, os.path.abspath('.'))
+import os
+import sys
 
-from typing import List, Dict, Tuple, Optional
+sys.path.insert(0, os.path.abspath("../.."))
+
+
 import sphinx_rtd_theme  # pylint: disable=unused-import  # noqa:F401
 
 # -- Project information -----------------------------------------------------
@@ -22,12 +23,12 @@ import sphinx_rtd_theme  # pylint: disable=unused-import  # noqa:F401
 # the master toctree document
 master_doc = "index"
 
-project = 'python-ldap-faker'
-copyright = '2022, Caltech IMSS ADS'  # pylint: disable=redefined-builtin
-author = 'Caltech IMSS ADS'
+project = "python-ldap-faker"
+copyright = "2022, Caltech IMSS ADS"  # pylint: disable=redefined-builtin
+author = "Caltech IMSS ADS"
 
 # The full version, including alpha/beta/rc tags
-release = '1.2.1'
+release = "1.2.1"
 
 
 # -- General configuration ---------------------------------------------------
@@ -36,50 +37,49 @@ release = '1.2.1'
 # extensions coming with Sphinx (named 'sphinx.ext.*') or your custom
 # ones.
 extensions = [
-    'sphinx.ext.autodoc',
-    'sphinx.ext.napoleon',
-    'sphinx.ext.viewcode',
-    'sphinx.ext.intersphinx',
-    'sphinx_rtd_theme',
+    "sphinx.ext.autodoc",
+    "sphinx.ext.napoleon",
+    "sphinx.ext.viewcode",
+    "sphinx.ext.intersphinx",
+    "sphinx_rtd_theme",
     #'sphinx_json_globaltoc',
 ]
 
 source_suffix = ".rst"
 
 # Add any paths that contain templates here, relative to this directory.
-templates_path = ['_templates']
+templates_path = ["_templates"]
 
 # List of patterns, relative to source directory, that match files and
 # directories to ignore when looking for source files.
 # This pattern also affects html_static_path and html_extra_path.
-exclude_patterns: List[str] = ['_build']
+exclude_patterns: list[str] = ["_build"]
 
 add_function_parentheses = False
 add_module_names = True
 
 # Make Sphinx not expand all our Type Aliases
 
-autodoc_member_order = 'bysource'
+autodoc_member_order = "bysource"
 autodoc_type_aliases = {
-    'LDAPData': 'ldap_faker.types.LDAPData',
-    'CILDAPData': 'ldap_faker.types.CILDAPData',
-    'LDAPRecord': 'ldap_faker.types.LDAPRecord',
-    'LDAPSearchResult': 'ldap_faker.types.LDAPSearchResult',
-    'LDAPSearchDirectory': 'ldap_faker.types.LDAPSearchDirectory',
-    'LDAPObjectStore': 'ldap_faker.types.LDAPObjectStore',
-    'RawLDAPObjectStore': 'ldap_faker.types.RawLDAPObjectStore',
-    'LDAPOptionValue': 'ldap_faker.types.LDAPOptionValue',
-    'LDAPOptionStore': 'ldap_faker.types.LDAPOptionStore',
-    'ModList': 'ldap_faker.types.ModList',
-    'AddModList': 'ldap_faker.types.AddModList',
-    'LDAPFixtureList': 'ldap_faker.types.LDAPFixtureList',
+    "LDAPData": "ldap_faker.types.LDAPData",
+    "CILDAPData": "ldap_faker.types.CILDAPData",
+    "LDAPRecord": "ldap_faker.types.LDAPRecord",
+    "LDAPSearchResult": "ldap_faker.types.LDAPSearchResult",
+    "LDAPSearchDirectory": "ldap_faker.types.LDAPSearchDirectory",
+    "LDAPObjectStore": "ldap_faker.types.LDAPObjectStore",
+    "RawLDAPObjectStore": "ldap_faker.types.RawLDAPObjectStore",
+    "LDAPOptionValue": "ldap_faker.types.LDAPOptionValue",
+    "LDAPOptionStore": "ldap_faker.types.LDAPOptionStore",
+    "ModList": "ldap_faker.types.ModList",
+    "AddModList": "ldap_faker.types.AddModList",
+    "LDAPFixtureList": "ldap_faker.types.LDAPFixtureList",
 }
 
 # the locations and names of other projects that should be linked to this one
-intersphinx_mapping: Dict[str, Tuple[str, Optional[str]]] = {
-    'python': ('https://docs.python.org/3', None),
-    'python-ldap': ('https://www.python-ldap.org/en/latest/', None)
-
+intersphinx_mapping: dict[str, tuple[str, str | None]] = {
+    "python": ("https://docs.python.org/3", None),
+    "python-ldap": ("https://www.python-ldap.org/en/latest/", None),
 }
 
 
@@ -88,12 +88,12 @@ intersphinx_mapping: Dict[str, Tuple[str, Optional[str]]] = {
 # The theme to use for HTML and HTML Help pages.  See the documentation for
 # a list of builtin themes.
 #
-html_theme = 'sphinx_rtd_theme'
+html_theme = "sphinx_rtd_theme"
 
 # Add any paths that contain custom static files (such as style sheets) here,
 # relative to this directory. They are copied after the builtin static files,
 # so a file named "default.css" will overwrite the builtin "default.css".
-#html_static_path = ['_static']
+# html_static_path = ['_static']
 
 html_show_sourcelink = False
 html_show_sphinx = False

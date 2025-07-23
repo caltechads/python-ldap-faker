@@ -3,6 +3,18 @@ clean:
 	find . -name "*.pyc" | xargs rm
 	find . -name "__pycache__" | xargs rm -rf
 
+test:
+	@source .venv/bin/activate && python -m pytest ldap_faker/test/ -v
+
+test-quick:
+	@source .venv/bin/activate && python -m pytest ldap_faker/test/ -x
+
+test-vlv:
+	@source .venv/bin/activate && python -m pytest ldap_faker/test/test_vlv.py -v
+
+test-coverage:
+	@source .venv/bin/activate && python -m pytest ldap_faker/test/ --cov=ldap_faker --cov-report=html --cov-report=term
+
 dist: clean
 	@python -m build
 

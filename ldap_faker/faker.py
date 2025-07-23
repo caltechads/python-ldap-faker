@@ -84,6 +84,78 @@ def decode_sort_control_value(control_value: bytes) -> list[str]:
     return sort_keys
 
 
+def decode_vlv_control_value(control_value: bytes) -> dict[str, int | str | None]:
+    """
+    Decode BER-encoded controlValue for Virtual List View control.
+
+    The VLV control value contains:
+    - beforeCount: number of entries before the target
+    - afterCount: number of entries after the target
+    - target: either offset or assertion value
+    - contextID: optional context identifier
+
+    Args:
+        control_value: BER-encoded control value
+
+    Returns:
+        Dictionary with VLV parameters: beforeCount, afterCount, target, contextID
+
+    """
+    if not control_value:
+        return {}
+
+    try:
+        # For simplicity, we'll use a basic approach to decode VLV parameters
+        # In a real implementation, you'd use proper BER decoding
+        # For now, we'll assume a simple format: beforeCount,afterCount,target
+        decoded = control_value.decode("utf-8", errors="ignore")
+        parts = decoded.split(",")
+
+        if len(parts) >= 3:
+            return {
+                "beforeCount": int(parts[0]),
+                "afterCount": int(parts[1]),
+                "target": int(parts[2]),
+                "contextID": parts[3] if len(parts) > 3 else None,
+            }
+        elif len(parts) >= 2:
+            return {
+                "beforeCount": int(parts[0]),
+                "afterCount": int(parts[1]),
+                "target": 0,
+                "contextID": None,
+            }
+        else:
+            return {"beforeCount": 0, "afterCount": 0, "target": 0, "contextID": None}
+    except (ValueError, UnicodeDecodeError):
+        # Fallback to default values if decoding fails
+        return {"beforeCount": 0, "afterCount": 0, "target": 0, "contextID": None}
+
+
+def encode_vlv_response_control(
+    target_position: int, content_count: int, context_id: bytes | None = None
+) -> bytes:
+    """
+    Encode VLV response control value.
+
+    Args:
+        target_position: position of the target entry in the result set
+        content_count: total number of entries in the result set
+        context_id: optional context identifier
+
+    Returns:
+        BER-encoded VLV response control value
+
+    """
+    # For simplicity, we'll use a basic encoding approach
+    # In a real implementation, you'd use proper BER encoding
+    response_data = f"{target_position},{content_count}"
+    if context_id:
+        response_data += f",{context_id.decode('utf-8', errors='ignore')}"
+
+    return response_data.encode("utf-8")
+
+
 from .db import (
     CallHistory,
     LDAPCallRecord,
@@ -572,6 +644,7 @@ class FakeLDAPObject:
 
         - 1.2.840.113556.1.4.319 (Paged Results): Sets a cookie on the control for paging
         - 1.2.840.113556.1.4.473 (Server Side Sort): Sorts results by specified attributes
+        - 2.16.840.1.113730.3.4.9 (Virtual List View): Slices results based on target position and counts
 
         Examples:
             Paged Search:
@@ -662,6 +735,41 @@ class FakeLDAPObject:
                 # Get results (sorted and paged)
                 rtype, rdata, rmsgid, rctrls = conn.result3(msgid)
 
+            Virtual List View:
+
+            .. code-block:: python
+
+                import ldap
+                from ldap.controls import LDAPControl
+
+                # Create VLV control (get 5 entries before and after position 10)
+                # The controlValue should contain: beforeCount,afterCount,target
+                vlv_value = "5,5,10".encode('utf-8')
+                vlv_control = LDAPControl(
+                    '2.16.840.1.113730.3.4.9',
+                    True,
+                    vlv_value,
+                )
+
+                # Perform VLV search
+                msgid = conn.search_ext(
+                    'ou=users,dc=example,dc=com',
+                    ldap.SCOPE_SUBTREE,
+                    '(objectClass=person)',
+                    serverctrls=[vlv_control]
+                )
+
+                # Get results with VLV response control
+                rtype, rdata, rmsgid, rctrls = conn.result3(msgid)
+
+                # Check for VLV response control
+                for ctrl in rctrls:
+                    if ctrl.controlType == '2.16.840.1.113730.3.4.10':
+                        # VLV response control contains target position and total count
+                        vlv_response = ctrl.controlValue.decode('utf-8')
+                        target_pos, total_count = vlv_response.split(',')[:2]
+                        print(f"Target position: {target_pos}, Total count: {total_count}")
+
         Keyword Args:
             base: the base DN for the search
             scope: the scope of the search
@@ -669,7 +777,7 @@ class FakeLDAPObject:
             attrlist: the list of attributes to return for each object
             attrsonly: if 1, return only the attribute values; if 0, return the
             entire object
-            serverctrls: server controls (supports Paged Results and Server Side Sort)
+            serverctrls: server controls (supports Paged Results, Server Side Sort, and Virtual List View)
             clientctrls: client controls (ignored)
             timeout: timeout for the search (ignored)
             sizelimit: size limit for the search (applied after sorting)
@@ -716,6 +824,53 @@ class FakeLDAPObject:
                     break
         # --- end sort control simulation ---
 
+        # --- LDAP VLV control simulation ---
+        # If a control with OID 2.16.840.1.113730.3.4.9 is present, apply VLV slicing.
+        # We decode the controlValue to get VLV parameters and slice the results accordingly.
+        vlv_response_ctrl = None
+        if serverctrls:
+            for ctrl in serverctrls:
+                if getattr(ctrl, "controlType", None) == "2.16.840.1.113730.3.4.9":
+                    # Decode the VLV control value to get parameters
+                    control_value = getattr(ctrl, "controlValue", None)
+                    if control_value:
+                        vlv_params = decode_vlv_control_value(control_value)
+                        before_count = int(vlv_params.get("beforeCount", 0) or 0)
+                        after_count = int(vlv_params.get("afterCount", 0) or 0)
+                        target = int(vlv_params.get("target", 0) or 0)
+                        context_id = vlv_params.get("contextID")
+
+                        # Apply VLV slicing
+                        total_count = len(value)
+                        if total_count > 0:
+                            # Calculate target position (0-based index)
+                            target_pos = min(target, total_count - 1)
+
+                            # Calculate slice boundaries
+                            start_pos = max(0, target_pos - before_count)
+                            end_pos = min(total_count, target_pos + after_count + 1)
+
+                            # Slice the results
+                            value = value[start_pos:end_pos]
+                        else:
+                            # Empty result set
+                            target_pos = 0
+
+                        # Create VLV response control (always create it)
+                        context_id_bytes = None
+                        if context_id and isinstance(context_id, str):
+                            context_id_bytes = context_id.encode("utf-8")
+
+                        vlv_response_ctrl = ldap.controls.LDAPControl(
+                            "2.16.840.1.113730.3.4.10",  # VLV Response Control OID
+                            True,
+                            encode_vlv_response_control(
+                                target_pos, total_count, context_id_bytes
+                            ),
+                        )
+                    break
+        # --- end VLV control simulation ---
+
         # --- LDAP size limit simulation ---
         # Apply size limit if specified (0 means no limit)
         if sizelimit > 0 and len(value) > sizelimit:
@@ -723,6 +878,11 @@ class FakeLDAPObject:
         # --- end size limit simulation ---
 
         self._async_results[msgid]["data"] = value
+        # Store VLV response control if it was created
+        if vlv_response_ctrl:
+            if "vlv_response" not in self._async_results[msgid]:
+                self._async_results[msgid]["vlv_response"] = []
+            self._async_results[msgid]["vlv_response"].append(vlv_response_ctrl)
         self.current_msgid += 1
         return msgid
 
@@ -756,6 +916,11 @@ class FakeLDAPObject:
         if msgid in self._async_results:
             data = self._async_results[msgid]["data"]
             controls = self._async_results[msgid]["ctrls"]
+            # Add VLV response controls if they exist
+            if "vlv_response" in self._async_results[msgid]:
+                if controls is None:
+                    controls = []
+                controls.extend(self._async_results[msgid]["vlv_response"])
             del self._async_results[msgid]
         else:
             data = []
@@ -1094,6 +1259,7 @@ class FakeLDAPObject:
             "supportedControl": [
                 b"1.2.840.113556.1.4.473",  # Server Side Sort (RFC 2891)
                 b"1.2.840.113556.1.4.319",  # Paged Results (RFC 2696)
+                b"2.16.840.1.113730.3.4.9",  # Virtual List View (RFC 2891)
             ],
             "supportedSASLMechanisms": [b"PLAIN", b"LOGIN"],
             "supportedLDAPVersion": [b"3"],
