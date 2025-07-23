@@ -11,6 +11,20 @@ import ldap
 from pyasn1.codec.ber import decoder, encoder
 from pyasn1.type import namedtype, tag, univ
 
+from .db import (
+    CallHistory,
+    LDAPCallRecord,
+    LDAPServerFactory,
+    ObjectStore,
+    OptionStore,
+)
+from .logging import logger
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from .types import AddModList, LDAPOptionValue, LDAPRecord, ModList, Result3
+
 
 # SortKey definition
 class SortKey(univ.Sequence):
@@ -198,20 +212,6 @@ def encode_vlv_response_control(
     # Encode using BER
     return encoder.encode(vlv_response)
 
-
-from .db import (
-    CallHistory,
-    LDAPCallRecord,
-    LDAPServerFactory,
-    ObjectStore,
-    OptionStore,
-)
-from .logging import logger
-
-if TYPE_CHECKING:
-    from collections.abc import Callable
-
-    from .types import AddModList, LDAPOptionValue, LDAPRecord, ModList, Result3
 
 # ====================================
 # Decorators
