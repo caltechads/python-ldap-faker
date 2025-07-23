@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any, TextIO, cast
 from urllib.parse import urlparse
 
 import ldap
-from pyasn1.codec.ber import decoder
+from pyasn1.codec.ber import decoder, encoder
 from pyasn1.type import namedtype, tag, univ
 
 
@@ -43,6 +43,32 @@ class SortKeyList(univ.SequenceOf):
     """
 
     componentType: univ.Sequence = SortKey()  # type: ignore[assignment]  # noqa: N815
+
+
+# VLV Response definition
+class VlvResponse(univ.Sequence):
+    """
+    VLV Response definition for the Virtual List View response control.
+
+    This is used to encode the response control value for the Virtual List View control.
+    """
+
+    componentType: namedtype.NamedTypes = namedtype.NamedTypes(  # noqa: N815
+        namedtype.NamedType("targetPosition", univ.Integer()),
+        namedtype.NamedType("contentCount", univ.Integer()),
+        namedtype.OptionalNamedType(
+            "virtualListViewResult",
+            univ.Enumerated().subtype(
+                explicitTag=tag.Tag(tag.tagClassContext, tag.tagFormatSimple, 0)
+            ),
+        ),
+        namedtype.OptionalNamedType(
+            "contextID",
+            univ.OctetString().subtype(
+                explicitTag=tag.Tag(tag.tagClassContext, tag.tagFormatSimple, 1)
+            ),
+        ),
+    )
 
 
 def decode_sort_control_value(control_value: bytes) -> list[str]:
@@ -136,7 +162,7 @@ def encode_vlv_response_control(
     target_position: int, content_count: int, context_id: bytes | None = None
 ) -> bytes:
     """
-    Encode VLV response control value.
+    Encode VLV response control value using proper ASN.1 BER encoding.
 
     Args:
         target_position: position of the target entry in the result set
@@ -147,13 +173,30 @@ def encode_vlv_response_control(
         BER-encoded VLV response control value
 
     """
-    # For simplicity, we'll use a basic encoding approach
-    # In a real implementation, you'd use proper BER encoding
-    response_data = f"{target_position},{content_count}"
-    if context_id:
-        response_data += f",{context_id.decode('utf-8', errors='ignore')}"
+    # Create VLV response structure according to RFC 2891
+    vlv_response = VlvResponse()
+    vlv_response.setComponentByName("targetPosition", univ.Integer(target_position))
+    vlv_response.setComponentByName("contentCount", univ.Integer(content_count))
 
-    return response_data.encode("utf-8")
+    # Add virtualListViewResult (optional, set to 0 for success)
+    vlv_response.setComponentByName(
+        "virtualListViewResult",
+        univ.Enumerated(0).subtype(
+            explicitTag=tag.Tag(tag.tagClassContext, tag.tagFormatSimple, 0)
+        ),
+    )
+
+    # Add contextID if provided
+    if context_id is not None:
+        vlv_response.setComponentByName(
+            "contextID",
+            univ.OctetString(context_id).subtype(
+                explicitTag=tag.Tag(tag.tagClassContext, tag.tagFormatSimple, 1)
+            ),
+        )
+
+    # Encode using BER
+    return encoder.encode(vlv_response)
 
 
 from .db import (

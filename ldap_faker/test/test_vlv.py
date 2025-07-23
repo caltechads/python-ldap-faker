@@ -4,8 +4,45 @@ Tests for VLV (Virtual List View) support in python-ldap-faker.
 
 import ldap
 from ldap.controls import LDAPControl
+from pyasn1.codec.ber import decoder
 
 from ldap_faker import FakeLDAP, LDAPServerFactory, ObjectStore
+
+
+def decode_vlv_response(control_value: bytes) -> dict:
+    """
+    Decode BER-encoded VLV response control value.
+
+    Args:
+        control_value: BER-encoded VLV response control value
+
+    Returns:
+        Dictionary with decoded VLV response data
+    """
+    # Import VlvResponse from faker module
+    from ldap_faker.faker import VlvResponse
+
+    try:
+        vlv_response, _ = decoder.decode(control_value, asn1Spec=VlvResponse())
+
+        result = {
+            "target_position": int(vlv_response.getComponentByName("targetPosition")),
+            "content_count": int(vlv_response.getComponentByName("contentCount")),
+        }
+
+        # Optional components
+        if vlv_response.getComponentByName("virtualListViewResult") is not None:
+            result["virtual_list_view_result"] = int(
+                vlv_response.getComponentByName("virtualListViewResult")
+            )
+
+        if vlv_response.getComponentByName("contextID") is not None:
+            result["context_id"] = vlv_response.getComponentByName("contextID")
+
+        return result
+    except Exception as e:
+        # Fallback for debugging
+        return {"error": str(e), "raw_value": control_value}
 
 
 class TestVLVSupport:
@@ -101,11 +138,12 @@ class TestVLVSupport:
         for ctrl in rctrls:
             if ctrl.controlType == "2.16.840.1.113730.3.4.10":
                 vlv_response_found = True
-                vlv_response = ctrl.controlValue.decode("utf-8")
-                parts = vlv_response.split(",")
-                assert len(parts) >= 2
-                target_pos = int(parts[0])
-                total_count = int(parts[1])
+                vlv_response_data = decode_vlv_response(ctrl.controlValue)
+                assert "error" not in vlv_response_data, (
+                    f"Failed to decode VLV response: {vlv_response_data}"
+                )
+                target_pos = vlv_response_data["target_position"]
+                total_count = vlv_response_data["content_count"]
                 assert target_pos == 1
                 assert total_count == 4  # admin, alice, bob, charlie
                 break
@@ -138,10 +176,12 @@ class TestVLVSupport:
         # Check VLV response control
         for ctrl in rctrls:
             if ctrl.controlType == "2.16.840.1.113730.3.4.10":
-                vlv_response = ctrl.controlValue.decode("utf-8")
-                parts = vlv_response.split(",")
-                target_pos = int(parts[0])
-                total_count = int(parts[1])
+                vlv_response_data = decode_vlv_response(ctrl.controlValue)
+                assert "error" not in vlv_response_data, (
+                    f"Failed to decode VLV response: {vlv_response_data}"
+                )
+                target_pos = vlv_response_data["target_position"]
+                total_count = vlv_response_data["content_count"]
                 assert target_pos == 3  # Last position (0-based)
                 assert total_count == 4
                 break
@@ -172,10 +212,12 @@ class TestVLVSupport:
         # Check VLV response control
         for ctrl in rctrls:
             if ctrl.controlType == "2.16.840.1.113730.3.4.10":
-                vlv_response = ctrl.controlValue.decode("utf-8")
-                parts = vlv_response.split(",")
-                target_pos = int(parts[0])
-                total_count = int(parts[1])
+                vlv_response_data = decode_vlv_response(ctrl.controlValue)
+                assert "error" not in vlv_response_data, (
+                    f"Failed to decode VLV response: {vlv_response_data}"
+                )
+                target_pos = vlv_response_data["target_position"]
+                total_count = vlv_response_data["content_count"]
                 assert target_pos == 0
                 assert total_count == 0
                 break
