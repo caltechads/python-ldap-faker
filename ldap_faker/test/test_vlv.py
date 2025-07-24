@@ -110,6 +110,11 @@ class TestVLVSupport:
 
     def test_vlv_basic_functionality(self):
         """Test basic VLV functionality."""
+        # Create sort control (required by RFC 2891)
+        from ldap.controls import ValueLessRequestControl
+
+        sort_control = ValueLessRequestControl("1.2.840.113556.1.4.473")
+
         # Test VLV control - get 1 entry before and after position 1
         vlv_value = "1,1,1".encode("utf-8")
         vlv_control = LDAPControl(
@@ -118,20 +123,23 @@ class TestVLVSupport:
             vlv_value,
         )
 
-        # Perform VLV search
+        # Perform VLV search with sort control (RFC 2891 compliant)
         msgid = self.conn.search_ext(
             "dc=example,dc=com",
             ldap.SCOPE_SUBTREE,
             "(objectClass=person)",
-            serverctrls=[vlv_control],
+            serverctrls=[sort_control, vlv_control],
         )
 
         # Get results
         rtype, rdata, rmsgid, rctrls = self.conn.result3(msgid)
 
-        # Should return 3 entries: admin (pos 0), alice (pos 1), bob (pos 2)
-        assert len(rdata) == 3
-        assert len(rctrls) == 2  # Original control + VLV response control
+        # Should return 2 entries: admin (target at pos 1) + alice (1 after)
+        # No entry before admin since it's the first entry
+        assert len(rdata) == 2
+        assert (
+            len(rctrls) == 3
+        )  # Sort control + VLV request control + VLV response control
 
         # Check for VLV response control
         vlv_response_found = False
@@ -152,6 +160,11 @@ class TestVLVSupport:
 
     def test_vlv_edge_cases(self):
         """Test VLV edge cases."""
+        # Create sort control (required by RFC 2891)
+        from ldap.controls import ValueLessRequestControl
+
+        sort_control = ValueLessRequestControl("1.2.840.113556.1.4.473")
+
         # Test VLV with target beyond available entries
         vlv_value = "1,1,10".encode("utf-8")  # Target position 10, but only 4 entries
         vlv_control = LDAPControl(
@@ -164,7 +177,7 @@ class TestVLVSupport:
             "dc=example,dc=com",
             ldap.SCOPE_SUBTREE,
             "(objectClass=person)",
-            serverctrls=[vlv_control],
+            serverctrls=[sort_control, vlv_control],
         )
 
         rtype, rdata, rmsgid, rctrls = self.conn.result3(msgid)
@@ -182,12 +195,17 @@ class TestVLVSupport:
                 )
                 target_pos = vlv_response_data["target_position"]
                 total_count = vlv_response_data["content_count"]
-                assert target_pos == 3  # Last position (0-based)
+                assert target_pos == 4  # Last position (1-based per RFC 2891)
                 assert total_count == 4
                 break
 
     def test_vlv_with_empty_result(self):
         """Test VLV with empty search result."""
+        # Create sort control (required by RFC 2891)
+        from ldap.controls import ValueLessRequestControl
+
+        sort_control = ValueLessRequestControl("1.2.840.113556.1.4.473")
+
         # Test VLV with filter that returns no results
         vlv_value = "1,1,0".encode("utf-8")
         vlv_control = LDAPControl(
@@ -200,14 +218,16 @@ class TestVLVSupport:
             "dc=example,dc=com",
             ldap.SCOPE_SUBTREE,
             "(objectClass=nonexistent)",
-            serverctrls=[vlv_control],
+            serverctrls=[sort_control, vlv_control],
         )
 
         rtype, rdata, rmsgid, rctrls = self.conn.result3(msgid)
 
         # Should return no entries
         assert len(rdata) == 0
-        assert len(rctrls) == 2  # Original control + VLV response control
+        assert (
+            len(rctrls) == 3
+        )  # Sort control + VLV request control + VLV response control
 
         # Check VLV response control
         for ctrl in rctrls:

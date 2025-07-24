@@ -9,7 +9,7 @@ from urllib.parse import urlparse
 
 import ldap
 from pyasn1.codec.ber import decoder, encoder
-from pyasn1.type import namedtype, tag, univ
+from pyasn1.type import namedtype, namedval, tag, univ
 
 from .db import (
     CallHistory,
@@ -49,31 +49,132 @@ class SortKey(univ.Sequence):
     )
 
 
-# SortKeyList is a sequence of SortKeys
-class SortKeyList(univ.SequenceOf):
+# RFC 2891 compliant VLV Request structures
+class VlvRequestByOffset(univ.Sequence):
     """
-    SortKeyList is a sequence of SortKeys.  Used to decode the controlValue for the
-    Server Side Sort control, OID 1.2.840.113556.1.4.473.
+    VLV Request byoffset choice structure according to RFC 2891.
+
+    This represents the byoffset choice in the VLV request control:
+    byoffset [0] SEQUENCE {
+        offset          INTEGER (0 .. maxInt),
+        contentCount    INTEGER (0 .. maxInt)
+    }
     """
 
-    componentType: univ.Sequence = SortKey()  # type: ignore[assignment]  # noqa: N815
+    componentType: namedtype.NamedTypes = namedtype.NamedTypes(  # noqa: N815
+        namedtype.NamedType("offset", univ.Integer()),
+        namedtype.NamedType("contentCount", univ.Integer()),
+    )
 
 
-# VLV Response definition
+class VlvRequestChoice(univ.Choice):
+    """
+    VLV Request target choice structure according to RFC 2891.
+
+    This represents the CHOICE between byoffset and greaterThanOrEqual:
+    CHOICE {
+        byoffset [0] SEQUENCE {
+         offset          INTEGER (0 .. maxInt),
+         contentCount    INTEGER (0 .. maxInt) },
+        greaterThanOrEqual [1] AssertionValue }
+    """
+
+    componentType: namedtype.NamedTypes = namedtype.NamedTypes(  # noqa: N815
+        namedtype.NamedType(
+            "byoffset",
+            VlvRequestByOffset().subtype(
+                explicitTag=tag.Tag(tag.tagClassContext, tag.tagFormatConstructed, 0)
+            ),
+        ),
+        namedtype.NamedType(
+            "greaterThanOrEqual",
+            univ.OctetString().subtype(
+                explicitTag=tag.Tag(tag.tagClassContext, tag.tagFormatSimple, 1)
+            ),
+        ),
+    )
+
+
+class VlvRequest(univ.Sequence):
+    """
+    VLV Request structure according to RFC 2891.
+
+    VirtualListViewRequest ::= SEQUENCE {
+        beforeCount    INTEGER (0..maxInt),
+        afterCount     INTEGER (0..maxInt),
+        CHOICE {
+            byoffset [0] SEQUENCE {
+             offset          INTEGER (0 .. maxInt),
+             contentCount    INTEGER (0 .. maxInt) },
+            greaterThanOrEqual [1] AssertionValue },
+        contextID     OCTET STRING OPTIONAL }
+    """
+
+    componentType: namedtype.NamedTypes = namedtype.NamedTypes(  # noqa: N815
+        namedtype.NamedType("beforeCount", univ.Integer()),
+        namedtype.NamedType("afterCount", univ.Integer()),
+        namedtype.NamedType("target", VlvRequestChoice()),
+        namedtype.OptionalNamedType("contextID", univ.OctetString()),
+    )
+
+
+# Simple VLV Request structure (django-ldaporm format)
+class VlvRequestSimple(univ.Sequence):
+    """
+    Simplified VLV Request structure used by django-ldaporm.
+
+    This is NOT RFC 2891 compliant but matches what django-ldaporm actually sends:
+    SEQUENCE {
+        beforeCount    INTEGER,
+        afterCount     INTEGER,
+        offset         INTEGER,
+        count          INTEGER,
+        contextID      OCTET STRING OPTIONAL [0]
+    }
+    """
+
+    componentType: namedtype.NamedTypes = namedtype.NamedTypes(  # noqa: N815
+        namedtype.NamedType("beforeCount", univ.Integer()),
+        namedtype.NamedType("afterCount", univ.Integer()),
+        namedtype.NamedType("offset", univ.Integer()),
+        namedtype.NamedType("count", univ.Integer()),
+        namedtype.OptionalNamedType(
+            "contextID",
+            univ.OctetString().subtype(
+                explicitTag=tag.Tag(tag.tagClassContext, tag.tagFormatSimple, 0)
+            ),
+        ),
+    )
+
+
+# VLV Response definition (Compatible with django-ldaporm/Microsoft AD format)
 class VlvResponse(univ.Sequence):
     """
-    VLV Response definition for the Virtual List View response control.
+    VLV Response structure compatible with django-ldaporm expectations.
 
-    This is used to encode the response control value for the Virtual List View control.
+    This matches the Microsoft Active Directory VLV implementation which uses
+    explicit tags for optional fields, rather than the plain RFC 2891 format.
     """
 
     componentType: namedtype.NamedTypes = namedtype.NamedTypes(  # noqa: N815
         namedtype.NamedType("targetPosition", univ.Integer()),
         namedtype.NamedType("contentCount", univ.Integer()),
-        namedtype.OptionalNamedType(
+        namedtype.NamedType(
             "virtualListViewResult",
             univ.Enumerated().subtype(
-                explicitTag=tag.Tag(tag.tagClassContext, tag.tagFormatSimple, 0)
+                namedValues=namedval.NamedValues(
+                    ("success", 0),
+                    ("operationsError", 1),
+                    ("unwillingToPerform", 53),
+                    ("insufficientAccessRights", 50),
+                    ("busy", 51),
+                    ("timeLimitExceeded", 3),
+                    ("adminLimitExceeded", 11),
+                    ("sortControlMissing", 60),
+                    ("offsetRangeError", 61),
+                    ("other", 80),
+                ),
+                explicitTag=tag.Tag(tag.tagClassContext, tag.tagFormatSimple, 0),
             ),
         ),
         namedtype.OptionalNamedType(
@@ -83,6 +184,16 @@ class VlvResponse(univ.Sequence):
             ),
         ),
     )
+
+
+# SortKeyList is a sequence of SortKeys
+class SortKeyList(univ.SequenceOf):
+    """
+    SortKeyList is a sequence of SortKeys.  Used to decode the controlValue for the
+    Server Side Sort control, OID 1.2.840.113556.1.4.473.
+    """
+
+    componentType: univ.Sequence = SortKey()  # type: ignore[assignment]  # noqa: N815
 
 
 def decode_sort_control_value(control_value: bytes) -> list[str]:
@@ -128,89 +239,255 @@ def decode_vlv_control_value(control_value: bytes) -> dict[str, int | str | None
     """
     Decode BER-encoded controlValue for Virtual List View control.
 
+    Supports both RFC 2891 compliant format and django-ldaporm simplified format.
+    Falls back to text parsing for backward compatibility.
+
     The VLV control value contains:
     - beforeCount: number of entries before the target
     - afterCount: number of entries after the target
     - target: either offset or assertion value
     - contextID: optional context identifier
+    - target_type: 'offset' or 'assertion' (for RFC format)
+    - content_count: total count (for offset-based targeting)
+    - assertion_value: assertion value (for assertion-based targeting)
 
     Args:
         control_value: BER-encoded control value
 
     Returns:
-        Dictionary with VLV parameters: beforeCount, afterCount, target, contextID
+        Dictionary with VLV parameters
 
     """
     if not control_value:
-        return {}
+        return {
+            "beforeCount": 0,
+            "afterCount": 0,
+            "target": 0,
+            "contextID": None,
+            "target_type": "offset",
+        }
 
+    # Try RFC 2891 compliant format first
     try:
-        # For simplicity, we'll use a basic approach to decode VLV parameters
-        # In a real implementation, you'd use proper BER decoding
-        # For now, we'll assume a simple format: beforeCount,afterCount,target
-        decoded = control_value.decode("utf-8", errors="ignore")
-        parts = decoded.split(",")
+        vlv_request, _ = decoder.decode(control_value, asn1Spec=VlvRequest())
 
-        if len(parts) >= 3:  # noqa: PLR2004
+        before_count = int(vlv_request.getComponentByName("beforeCount"))
+        after_count = int(vlv_request.getComponentByName("afterCount"))
+
+        # Extract contextID if present
+        context_id = vlv_request.getComponentByName("contextID")
+        try:
+            context_id_str = str(context_id) if context_id else None
+        except:
+            context_id_str = None
+
+        # Handle the CHOICE for target
+        target_choice = vlv_request.getComponentByName("target")
+        chosen_name = target_choice.getName()
+
+        if chosen_name == "byoffset":
+            # Handle byoffset choice
+            byoffset = target_choice.getComponent()
+            offset = int(byoffset.getComponentByName("offset"))
+            content_count = int(byoffset.getComponentByName("contentCount"))
+
             return {
-                "beforeCount": int(parts[0]),
-                "afterCount": int(parts[1]),
-                "target": int(parts[2]),
-                "contextID": parts[3] if len(parts) > 3 else None,  # noqa: PLR2004
+                "beforeCount": before_count,
+                "afterCount": after_count,
+                "target": offset,
+                "contextID": context_id_str,
+                "target_type": "offset",
+                "content_count": content_count,
             }
-        if len(parts) >= 2:  # noqa: PLR2004
+        elif chosen_name == "greaterThanOrEqual":
+            # Handle greaterThanOrEqual choice
+            assertion_value = str(target_choice.getComponent())
+
             return {
-                "beforeCount": int(parts[0]),
-                "afterCount": int(parts[1]),
-                "target": 0,
-                "contextID": None,
+                "beforeCount": before_count,
+                "afterCount": after_count,
+                "target": 0,  # Will be calculated during processing
+                "contextID": context_id_str,
+                "target_type": "assertion",
+                "assertion_value": assertion_value,
             }
-        else:  # noqa: RET505
-            return {"beforeCount": 0, "afterCount": 0, "target": 0, "contextID": None}
-    except (ValueError, UnicodeDecodeError):
-        # Fallback to default values if decoding fails
-        return {"beforeCount": 0, "afterCount": 0, "target": 0, "contextID": None}
+        else:
+            raise ValueError(f"Unknown target choice: {chosen_name}")
+
+    except Exception as e:
+        logger.debug("RFC 2891 VLV decoding failed: %s", e)
+
+        # Try django-ldaporm simplified format
+        try:
+            vlv_request_simple, _ = decoder.decode(
+                control_value, asn1Spec=VlvRequestSimple()
+            )
+
+            before_count = int(vlv_request_simple.getComponentByName("beforeCount"))
+            after_count = int(vlv_request_simple.getComponentByName("afterCount"))
+            offset = int(vlv_request_simple.getComponentByName("offset"))
+            content_count = int(vlv_request_simple.getComponentByName("count"))
+
+            # Extract contextID if present
+            context_id = vlv_request_simple.getComponentByName("contextID")
+            try:
+                context_id_str = str(context_id) if context_id else None
+            except:
+                context_id_str = None
+
+            return {
+                "beforeCount": before_count,
+                "afterCount": after_count,
+                "target": offset,
+                "contextID": context_id_str,
+                "target_type": "offset",
+                "content_count": content_count,
+            }
+
+        except Exception as e2:
+            logger.debug("Django-ldaporm VLV decoding failed: %s", e2)
+
+            # Fall back to text parsing for backward compatibility
+            try:
+                decoded = control_value.decode("utf-8", errors="ignore")
+                parts = decoded.split(",")
+
+                if len(parts) >= 3:  # noqa: PLR2004
+                    return {
+                        "beforeCount": int(parts[0]),
+                        "afterCount": int(parts[1]),
+                        "target": int(parts[2]),
+                        "contextID": parts[3] if len(parts) > 3 else None,  # noqa: PLR2004
+                        "target_type": "offset",
+                    }
+                if len(parts) >= 2:  # noqa: PLR2004
+                    return {
+                        "beforeCount": int(parts[0]),
+                        "afterCount": int(parts[1]),
+                        "target": 0,
+                        "contextID": None,
+                        "target_type": "offset",
+                    }
+                else:  # noqa: RET505
+                    return {
+                        "beforeCount": 0,
+                        "afterCount": 0,
+                        "target": 0,
+                        "contextID": None,
+                        "target_type": "offset",
+                    }
+            except (ValueError, UnicodeDecodeError):
+                logger.warning("All VLV decoding methods failed, using defaults")
+                # Fallback to default values if all decoding fails
+                return {
+                    "beforeCount": 0,
+                    "afterCount": 0,
+                    "target": 0,
+                    "contextID": None,
+                    "target_type": "offset",
+                }
 
 
 def encode_vlv_response_control(
-    target_position: int, content_count: int, context_id: bytes | None = None
+    target_position: int,
+    content_count: int,
+    result_code: int = 0,
+    context_id: bytes | None = None,
 ) -> bytes:
     """
-    Encode VLV response control value using proper ASN.1 BER encoding.
+    Encode VLV response control value using proper ASN.1 BER encoding according to RFC 2891.
 
     Args:
-        target_position: position of the target entry in the result set
+        target_position: position of the target entry in the result set (0-based)
         content_count: total number of entries in the result set
-        context_id: optional context identifier
+        result_code: VLV operation result code (RFC 2891):
+            0 = success
+            1 = operationsError
+            3 = timeLimitExceeded
+            11 = adminLimitExceeded
+            50 = insufficientAccessRights
+            51 = busy
+            53 = unwillingToPerform
+            60 = sortControlMissing
+            61 = offsetRangeError
+            80 = other
+        context_id: optional context identifier for performance optimization
 
     Returns:
         BER-encoded VLV response control value
 
+    Raises:
+        ValueError: If invalid parameters are provided
+
     """
-    # Create VLV response structure according to RFC 2891
+    # Validate parameters
+    if target_position < 0:
+        raise ValueError(f"target_position must be >= 0, got {target_position}")
+    if content_count < 0:
+        raise ValueError(f"content_count must be >= 0, got {content_count}")
+
+    # Valid VLV result codes according to RFC 2891
+    valid_result_codes = {0, 1, 3, 11, 50, 51, 53, 60, 61, 80}
+    if result_code not in valid_result_codes:
+        logger.warning("Invalid VLV result code %d, using 80 (other)", result_code)
+        result_code = 80  # 'other' error code
+
+    # Create the ASN.1 structure
     vlv_response = VlvResponse()
-    vlv_response.setComponentByName("targetPosition", univ.Integer(target_position))
-    vlv_response.setComponentByName("contentCount", univ.Integer(content_count))
+    vlv_response.setComponentByName("targetPosition", target_position)
+    vlv_response.setComponentByName("contentCount", content_count)
 
-    # Add virtualListViewResult (optional, set to 0 for success)
-    vlv_response.setComponentByName(
-        "virtualListViewResult",
-        univ.Enumerated(0).subtype(
-            explicitTag=tag.Tag(tag.tagClassContext, tag.tagFormatSimple, 0)
+    # Create enumerated with explicit tag for virtualListViewResult
+    result_enum = univ.Enumerated(result_code).subtype(
+        namedValues=namedval.NamedValues(
+            ("success", 0),
+            ("operationsError", 1),
+            ("unwillingToPerform", 53),
+            ("insufficientAccessRights", 50),
+            ("busy", 51),
+            ("timeLimitExceeded", 3),
+            ("adminLimitExceeded", 11),
+            ("sortControlMissing", 60),
+            ("offsetRangeError", 61),
+            ("other", 80),
         ),
+        explicitTag=tag.Tag(tag.tagClassContext, tag.tagFormatSimple, 0),
     )
+    vlv_response.setComponentByName("virtualListViewResult", result_enum)
 
-    # Add contextID if provided
     if context_id is not None:
-        vlv_response.setComponentByName(
-            "contextID",
-            univ.OctetString(context_id).subtype(
-                explicitTag=tag.Tag(tag.tagClassContext, tag.tagFormatSimple, 1)
-            ),
+        # Create octet string with explicit tag for contextID
+        context_octet = univ.OctetString(context_id).subtype(
+            explicitTag=tag.Tag(tag.tagClassContext, tag.tagFormatSimple, 1)
         )
+        vlv_response.setComponentByName("contextID", context_octet)
 
     # Encode using BER
-    return encoder.encode(vlv_response)
+    try:
+        return encoder.encode(vlv_response)
+    except Exception as e:
+        logger.error("Failed to encode VLV response control: %s", e)
+        raise ValueError(f"Failed to encode VLV response: {e}") from e
+
+
+def create_vlv_context_id(search_params: dict) -> bytes:
+    """
+    Create a context ID for VLV operations to improve performance.
+
+    Args:
+        search_params: Dictionary containing search parameters
+
+    Returns:
+        Context ID as bytes
+    """
+    import hashlib
+    import time
+
+    # Create a unique context ID based on search parameters and timestamp
+    context_data = f"{search_params}:{time.time()}"
+    return hashlib.sha256(context_data.encode()).digest()[
+        :16
+    ]  # 16 bytes should be sufficient
 
 
 # ====================================
@@ -830,6 +1107,11 @@ class FakeLDAPObject:
 
         """  # noqa: E501
         msgid = self.current_msgid
+        self._async_results[msgid] = {}
+        self._async_results[msgid]["ctrls"] = (
+            list(serverctrls) if serverctrls else []
+        )  # Preserve original controls
+        self._async_results[msgid]["data"] = []
         if serverctrls:
             # Find the Paged Results control (OID: 1.2.840.113556.1.4.319) and
             # set the cookie on it
@@ -837,8 +1119,6 @@ class FakeLDAPObject:
                 if getattr(ctrl, "controlType", None) == "1.2.840.113556.1.4.319":
                     ctrl.cookie = b"%d" % msgid
                     break
-        self._async_results[msgid] = {}
-        self._async_results[msgid]["ctrls"] = serverctrls
         value = self._search_s(base, scope, filterstr, attrlist, attrsonly)
 
         # --- LDAP sort control simulation ---
@@ -867,50 +1147,183 @@ class FakeLDAPObject:
                     break
         # --- end sort control simulation ---
 
-        # --- LDAP VLV control simulation ---
+        # --- LDAP VLV control simulation (RFC 2891 compliant) ---
         # If a control with OID 2.16.840.1.113730.3.4.9 is present, apply VLV slicing.
         # We decode the controlValue to get VLV parameters and slice the results
-        # accordingly.
+        # according to RFC 2891 specifications.
         vlv_response_ctrl = None
         if serverctrls:
             for ctrl in serverctrls:
                 if getattr(ctrl, "controlType", None) == "2.16.840.1.113730.3.4.9":
+                    logger.debug("VLV control detected, processing...")
                     # Decode the VLV control value to get parameters
-                    control_value = getattr(ctrl, "controlValue", None)
-                    if control_value:
-                        vlv_params = decode_vlv_control_value(control_value)
+                    try:
+                        vlv_params = decode_vlv_control_value(ctrl.controlValue)
                         before_count = int(vlv_params.get("beforeCount", 0) or 0)
                         after_count = int(vlv_params.get("afterCount", 0) or 0)
-                        target = int(vlv_params.get("target", 0) or 0)
-                        context_id = vlv_params.get("contextID")
+                        target_type = vlv_params.get("target_type", "offset")
+                        context_id_raw = vlv_params.get("contextID")
+                        context_id = (
+                            context_id_raw
+                            if isinstance(context_id_raw, bytes)
+                            else None
+                        )
 
-                        # Apply VLV slicing
+                        logger.debug(
+                            f"VLV parameters: target_type={target_type}, before_count={before_count}, "
+                            f"after_count={after_count}, context_id={context_id}"
+                        )
+
+                        # Extract target information based on target type
                         total_count = len(value)
-                        if total_count > 0:
-                            # Calculate target position (0-based index)
-                            target_pos = min(target, total_count - 1)
+                        if target_type == "offset":
+                            # Offset-based targeting
+                            target = int(vlv_params.get("target", 0) or 0)
 
-                            # Calculate slice boundaries
+                            # Check for 32-bit range overflow (RFC 2891 requirement)
+                            if target > 2147483647:  # 2^31 - 1 (max 32-bit signed int)
+                                logger.warning(
+                                    f"VLV target {target} exceeds 32-bit range"
+                                )
+                                # Set offsetRangeError per RFC 2891
+                                vlv_response_ctrl = ldap.controls.LDAPControl(
+                                    "2.16.840.1.113730.3.4.10",  # VLV Response Control OID
+                                    True,  # noqa: FBT003
+                                    encode_vlv_response_control(
+                                        0,  # target_pos
+                                        total_count,
+                                        61,  # offsetRangeError
+                                        None,  # context_id
+                                    ),
+                                )
+                                break  # Break out of VLV processing with error
+
+                            target_pos = max(
+                                0, target - 1
+                            )  # Convert from 1-based RFC format to 0-based internal format
+                            logger.debug(
+                                f"Offset targeting: target={target}, target_pos={target_pos}"
+                            )
+                        else:
+                            # For assertion-based targeting, default to beginning for now
+                            target_pos = 0
+                            logger.debug(
+                                f"Assertion targeting: target_pos={target_pos}"
+                            )
+
+                        # Check if server-side sort control is present (RFC requirement)
+                        has_sort_control = any(
+                            getattr(c, "controlType", None) == "1.2.840.113556.1.4.473"
+                            for c in serverctrls
+                        )
+                        logger.debug(f"Sort control present: {has_sort_control}")
+
+                        # Determine base result code from sort control presence
+                        if not has_sort_control:
+                            logger.warning(
+                                "VLV control used without sort control (RFC 2891 violation)"
+                            )
+                            base_result_code = 60  # sortControlMissing
+                        else:
+                            base_result_code = 0  # success
+
+                        # Check for out-of-bounds target and clamp if needed
+                        was_clamped = False
+                        if target_pos >= total_count and total_count > 0:
+                            # Offset is beyond available data - clamp to last valid position (RFC 2891 behavior)
+                            logger.debug(
+                                f"Out-of-bounds detected: target_pos={target_pos}, total_count={total_count}, clamping to {total_count - 1}"
+                            )
+                            # Per RFC 2891: clamp to valid position and return success, not an error
+                            # offsetRangeError (61) is only for when result set exceeds 32-bit range limits
+                            target_pos = total_count - 1  # Clamp to last valid position
+                            was_clamped = True
+                            result_code = base_result_code  # Keep the original result code (success or sortControlMissing)
+                        else:
+                            result_code = base_result_code
+
+                        # Handle different target types (sort control already validated above)
+                        logger.debug(
+                            f"Checking slice condition: result_code={result_code}, total_count={total_count}"
+                        )
+                        if result_code == 0 and total_count > 0:
+                            # Calculate slice boundaries for successful case
                             start_pos = max(0, target_pos - before_count)
                             end_pos = min(total_count, target_pos + after_count + 1)
 
+                            logger.debug(
+                                f"VLV slice calculation: target_pos={target_pos}, before_count={before_count}, "
+                                f"after_count={after_count}, start_pos={start_pos}, end_pos={end_pos}, "
+                                f"total_count={total_count}, result_code={result_code}"
+                            )
+
                             # Slice the results
                             value = value[start_pos:end_pos]
-                        else:
-                            # Empty result set
+
+                            logger.debug(f"After slicing: {len(value)} results")
+
+                            # Per RFC 2891: target position should be absolute position in full result set (1-based)
+                            # Convert from 0-based internal representation to 1-based RFC format
+                            target_pos = target_pos + 1
+                        elif result_code == 0:
+                            # Empty result set but no error
+                            logger.debug("Taking empty result set path")
                             target_pos = 0
+                            value = []
+                        else:
+                            # Error case - return empty results but preserve error code
+                            logger.debug(
+                                f"Taking error case path: result_code={result_code}"
+                            )
+                            value = []
+                            target_pos = 1 if total_count > 0 else 0
 
-                        # Create VLV response control (always create it)
-                        context_id_bytes = None
-                        if context_id and isinstance(context_id, str):
-                            context_id_bytes = context_id.encode("utf-8")
+                        # Prepare context ID (common for all cases)
+                        if context_id:
+                            context_id_bytes = context_id
+                        else:
+                            # Generate new context ID for this search
+                            search_params = {
+                                "base": base,
+                                "scope": scope,
+                                "filter": filterstr,
+                                "attrs": attrlist,
+                            }
+                            context_id_bytes = create_vlv_context_id(search_params)
 
+                        # Create VLV response control (always create it for all cases)
+                        logger.debug(
+                            f"About to create VLV response control with result_code={result_code}"
+                        )
                         vlv_response_ctrl = ldap.controls.LDAPControl(
                             "2.16.840.1.113730.3.4.10",  # VLV Response Control OID
                             True,  # noqa: FBT003
                             encode_vlv_response_control(
-                                target_pos, total_count, context_id_bytes
+                                target_pos,
+                                total_count,
+                                result_code,
+                                context_id_bytes,
                             ),
+                        )
+                        logger.debug(
+                            f"Created VLV response control: target_pos={target_pos}, total_count={total_count}, result_code={result_code}"
+                        )
+
+                    except Exception as e:
+                        logger.error("VLV control processing failed: %s", e)
+                        # Create error response
+                        vlv_response_ctrl = ldap.controls.LDAPControl(
+                            "2.16.840.1.113730.3.4.10",  # VLV Response Control OID
+                            True,  # noqa: FBT003
+                            encode_vlv_response_control(
+                                0,  # target_pos
+                                len(value),  # content_count
+                                1,  # operationsError
+                                None,  # no context_id
+                            ),
+                        )
+                        logger.debug(
+                            "Created VLV error response control due to processing failure"
                         )
                     break
         # --- end VLV control simulation ---
@@ -924,9 +1337,12 @@ class FakeLDAPObject:
         self._async_results[msgid]["data"] = value
         # Store VLV response control if it was created
         if vlv_response_ctrl:
-            if "vlv_response" not in self._async_results[msgid]:
-                self._async_results[msgid]["vlv_response"] = []
-            self._async_results[msgid]["vlv_response"].append(vlv_response_ctrl)
+            logger.debug(
+                f"Attaching VLV response control to search results: {vlv_response_ctrl.controlValue.hex()}"
+            )
+            if msgid not in self._async_results:
+                self._async_results[msgid] = {}
+            self._async_results[msgid]["vlv_response"] = vlv_response_ctrl
         self.current_msgid += 1
         return msgid
 
@@ -964,7 +1380,14 @@ class FakeLDAPObject:
             if "vlv_response" in self._async_results[msgid]:
                 if controls is None:
                     controls = []
-                controls.extend(self._async_results[msgid]["vlv_response"])
+                vlv_response = self._async_results[msgid]["vlv_response"]
+                if isinstance(vlv_response, list):
+                    controls.extend(vlv_response)
+                else:
+                    controls.append(vlv_response)
+                logger.debug(
+                    f"Added VLV response control to results, total controls: {len(controls)}"
+                )
             del self._async_results[msgid]
         else:
             data = []
