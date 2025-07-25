@@ -3,8 +3,101 @@ from pathlib import Path
 
 import ldap
 import asn1
+from pyasn1.codec.ber import encoder
+from pyasn1.type import namedtype, namedval, tag, univ
 
 from ldap_faker import FakeLDAPObject, ObjectStore
+
+
+# SortKey definition (copied from faker.py for testing)
+class SortKey(univ.Sequence):
+    """
+    SortKey definition for the Server Side Sort control, OID 1.2.840.113556.1.4.473.
+    """
+
+    componentType: namedtype.NamedTypes = namedtype.NamedTypes(  # noqa: N815
+        namedtype.NamedType("attributeType", univ.OctetString()),
+        namedtype.OptionalNamedType(
+            "orderingRule",
+            univ.OctetString().subtype(
+                explicitTag=tag.Tag(tag.tagClassContext, tag.tagFormatSimple, 0)
+            ),
+        ),
+        namedtype.DefaultedNamedType(
+            "reverseOrder",
+            univ.Boolean(False).subtype(  # noqa: FBT003
+                explicitTag=tag.Tag(tag.tagClassContext, tag.tagFormatSimple, 1)
+            ),
+        ),
+    )
+
+
+class SortKeyList(univ.SequenceOf):
+    """
+    SortKeyList definition for the Server Side Sort control.
+    """
+
+    componentType = SortKey()
+
+
+def encode_sort_control_value_pyasn1(sort_specs):
+    """
+    Encode sort control value using pyasn1 with support for reverse order.
+
+    Args:
+        sort_specs: List of either strings (for ascending) or tuples (attr, reverse)
+                   or dictionaries with 'attr' and 'reverse' keys
+    """
+    sort_key_list = SortKeyList()
+
+    for i, spec in enumerate(sort_specs):
+        sort_key = SortKey()
+
+        if isinstance(spec, str):
+            # Handle minus-prefixed strings
+            if spec.startswith("-"):
+                attr_name = spec[1:]
+                reverse = True
+            else:
+                attr_name = spec
+                reverse = False
+        elif isinstance(spec, tuple):
+            # Handle (attr, reverse) tuples
+            attr_name, reverse = spec
+        elif isinstance(spec, dict):
+            # Handle dictionary format
+            attr_name = spec["attr"]
+            reverse = spec.get("reverse", False)
+        else:
+            raise ValueError(f"Invalid sort spec: {spec}")
+
+        sort_key.setComponentByName(
+            "attributeType", univ.OctetString(attr_name.encode("utf-8"))
+        )
+
+        if reverse:
+            sort_key.setComponentByName(
+                "reverseOrder",
+                univ.Boolean(True).subtype(
+                    explicitTag=tag.Tag(tag.tagClassContext, tag.tagFormatSimple, 1)
+                ),
+            )
+
+        sort_key_list.setComponentByPosition(i, sort_key)
+
+    return encoder.encode(sort_key_list)
+
+
+def encode_sort_control_value_asn1(sort_keys):
+    encoder = asn1.Encoder()
+    encoder.start()
+    encoder.enter(asn1.Numbers.Sequence)
+    for key in sort_keys:
+        encoder.enter(asn1.Numbers.Sequence)
+        encoder.write(key.encode("utf-8"), asn1.Numbers.OctetString)
+        encoder.leave()
+    encoder.leave()
+    return encoder.output()
 
 
 class RegisterObjectsMixin:
@@ -652,18 +745,6 @@ class TestObjectStore_search_ext_AND_result3(RegisterObjectsMixin, unittest.Test
         self.assertIs(ctrls[0], controls2)
 
 
-def encode_sort_control_value_asn1(sort_keys):
-    encoder = asn1.Encoder()
-    encoder.start()
-    encoder.enter(asn1.Numbers.Sequence)
-    for key in sort_keys:
-        encoder.enter(asn1.Numbers.Sequence)
-        encoder.write(key.encode("utf-8"), asn1.Numbers.OctetString)
-        encoder.leave()
-    encoder.leave()
-    return encoder.output()
-
-
 class TestObjectStore_search_ext_sort_control(RegisterObjectsMixin, unittest.TestCase):
     def setUp(self):
         super().setUp()
@@ -675,7 +756,15 @@ class TestObjectStore_search_ext_sort_control(RegisterObjectsMixin, unittest.Tes
                 self.criticality = False
                 self.controlValue = encode_sort_control_value_asn1(sort_keys)
 
+        # Create a mock control for sorting with pyasn1 encoding (supports reverse order)
+        class MockSortControlPyasn1:
+            def __init__(self, sort_specs):
+                self.controlType = "1.2.840.113556.1.4.473"
+                self.criticality = False
+                self.controlValue = encode_sort_control_value_pyasn1(sort_specs)
+
         self.MockSortControl = MockSortControl
+        self.MockSortControlPyasn1 = MockSortControlPyasn1
 
     def test_search_ext_with_sort_control_sorts_results(self):
         """Test that search_ext sorts results when sort control is present."""
@@ -705,10 +794,10 @@ class TestObjectStore_search_ext_sort_control(RegisterObjectsMixin, unittest.Tes
         # Verify the cn values are sorted
         self.assertEqual(cn_values, sorted(cn_values))
 
-    def test_search_ext_with_multi_key_sort_control(self):
-        """Test that search_ext supports multi-key sorting."""
-        # Create a sort control that sorts by 'objectclass' then 'cn'
-        sort_control = self.MockSortControl(["objectclass", "cn"])
+    def test_search_ext_with_sort_control_reverse_order(self):
+        """Test that search_ext sorts results in reverse order when requested."""
+        # Create a sort control that sorts by 'cn' attribute in descending order
+        sort_control = self.MockSortControlPyasn1(["-cn"])
         controls = [sort_control]
 
         msgid = self.ldap.search_ext(
@@ -724,15 +813,52 @@ class TestObjectStore_search_ext_sort_control(RegisterObjectsMixin, unittest.Tes
         self.assertEqual(op, ldap.RES_SEARCH_RESULT)  # type: ignore[attr-defined]
         self.assertGreater(len(data), 1)
 
-        # Extract sort keys for verification
-        sort_keys = []
+        # Check that results are sorted by 'cn' in descending order (case-insensitive)
+        cn_values = []
         for dn, attrs in data:
-            objclass = attrs.get("objectclass", [b""])[0].decode().lower()
-            cn = attrs.get("cn", [b""])[0].decode().lower()
-            sort_keys.append((objclass, cn))
+            if "cn" in attrs:
+                cn_values.append(attrs["cn"][0].decode().lower())
 
-        # Verify the results are sorted by objectclass, then cn
-        self.assertEqual(sort_keys, sorted(sort_keys))
+        # Verify the cn values are sorted in reverse order
+        self.assertEqual(cn_values, sorted(cn_values, reverse=True))
+
+    def test_search_ext_with_sort_control_mixed_order(self):
+        """Test that search_ext handles mixed ascending/descending sort orders."""
+        # Create a sort control that sorts by 'objectClass' ascending, then 'cn' descending
+        sort_control = self.MockSortControlPyasn1(["objectClass", "-cn"])
+        controls = [sort_control]
+
+        msgid = self.ldap.search_ext(
+            "ou=mydept,o=myorg,c=country",
+            ldap.SCOPE_ONELEVEL,  # type: ignore[attr-defined]
+            "(objectclass=*)",
+            serverctrls=controls,
+        )
+
+        op, data, _msgid, ctrls = self.ldap.result3(msgid)
+
+        # Check that we got results
+        self.assertEqual(op, ldap.RES_SEARCH_RESULT)  # type: ignore[attr-defined]
+        self.assertGreater(len(data), 1)
+
+        # Group results by objectClass and verify ordering within each group
+        by_object_class = {}
+        for dn, attrs in data:
+            if "objectClass" in attrs and "cn" in attrs:
+                obj_class = attrs["objectClass"][0].decode().lower()
+                cn = attrs["cn"][0].decode().lower()
+                if obj_class not in by_object_class:
+                    by_object_class[obj_class] = []
+                by_object_class[obj_class].append(cn)
+
+        # Verify that within each objectClass group, cn values are in descending order
+        for obj_class, cn_values in by_object_class.items():
+            if len(cn_values) > 1:  # Only check if there are multiple values
+                self.assertEqual(
+                    cn_values,
+                    sorted(cn_values, reverse=True),
+                    f"CN values within {obj_class} should be in descending order",
+                )
 
     def test_search_ext_with_controlvalue_sort_keys(self):
         """Test that search_ext can use controlValue for sort keys."""

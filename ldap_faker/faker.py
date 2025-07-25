@@ -1133,17 +1133,28 @@ class FakeLDAPObject:
                         sort_keys = decode_sort_control_value(control_value)
                         if sort_keys:
                             # value is a list of (dn, attrs) tuples
-                            def sort_func(item):
-                                dn, attrs = item
-                                # Support multi-key sort
-                                return tuple(
-                                    attrs.get(key, [b""])[0].lower()
-                                    if attrs.get(key)
-                                    else b""
-                                    for key in sort_keys  # noqa: B023
+                            # Handle multiple field sorting by sorting in reverse order of keys
+                            temp_value = list(value)
+                            for key in reversed(sort_keys):  # noqa: B023
+                                descending = key.startswith("-")
+                                attr_name = key[1:] if descending else key
+
+                                def sort_func(item):
+                                    dn, attrs = item
+                                    attr_value = (
+                                        attrs.get(attr_name, [b""])[0]
+                                        if attrs.get(attr_name)
+                                        else b""
+                                    )
+                                    if isinstance(attr_value, bytes):
+                                        attr_value = attr_value.lower()
+                                    return attr_value
+
+                                temp_value = sorted(
+                                    temp_value, key=sort_func, reverse=descending
                                 )
 
-                            value = sorted(value, key=sort_func)
+                            value = temp_value
                     break
         # --- end sort control simulation ---
 
