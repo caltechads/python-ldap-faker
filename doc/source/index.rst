@@ -210,6 +210,7 @@ We can write our ``TestCase`` like so::
    objectstore
    implementations
    binds
+   controls
    unittest
    hooks
    api
